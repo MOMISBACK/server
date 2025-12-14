@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { body, validationResult } = require('express-validator');
 const { protect } = require('../middleware/authMiddleware');
 const Activity = require('../models/Activity');
 
@@ -19,11 +20,27 @@ router.get('/', protect, async (req, res) => {
 // @route   POST /api/activities
 // @desc    Create a new activity
 // @access  Private
-router.post('/', protect, async (req, res) => {
-  const { title, type, duration, distance, calories, date } = req.body;
+router.post(
+  '/',
+  protect,
+  [
+    body('title').not().isEmpty().trim().escape(),
+    body('type').isIn(['course', 'velo', 'natation', 'marche']),
+    body('duration').isFloat({ gt: 0 }),
+    body('distance').optional().isFloat({ gt: 0 }),
+    body('calories').optional().isFloat({ gt: 0 }),
+    body('date').optional().isISO8601().toDate(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
-  try {
-    const newActivity = new Activity({
+    const { title, type, duration, distance, calories, date } = req.body;
+
+    try {
+      const newActivity = new Activity({
       user: req.user.id,
       title,
       type,

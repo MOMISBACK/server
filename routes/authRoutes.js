@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcryptjs');
+const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const generateToken = require('../utils/generateToken');
 const { protect } = require('../middleware/authMiddleware');
@@ -8,11 +8,20 @@ const { protect } = require('../middleware/authMiddleware');
 // @route   POST /api/auth/register
 // @desc    Register a new user
 // @access  Public
-router.post('/register', async (req, res) => {
-  const { email, password } = req.body;
+router.post(
+  '/register',
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 6 }),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
-  try {
-    const userExists = await User.findOne({ email });
+    const { email, password } = req.body;
+
+    try {
+      const userExists = await User.findOne({ email });
 
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
@@ -40,10 +49,19 @@ router.post('/register', async (req, res) => {
 // @route   POST /api/auth/login
 // @desc    Authenticate user & get token
 // @access  Public
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
+router.post(
+  '/login',
+  body('email').isEmail().normalizeEmail(),
+  body('password').not().isEmpty(),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
-  try {
+    const { email, password } = req.body;
+
+    try {
     const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
