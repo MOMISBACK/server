@@ -2,7 +2,37 @@ const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const generateToken = require('../utils/generateToken');
-const sendEmail = require('../utils/sendEmail');
+const sendGridEmail = require('../utils/sendGridEmail');
+
+// Helper function to send verification email
+const sendVerificationEmail = async (user) => {
+  const verificationToken = user.getVerificationToken();
+  await user.save({ validateBeforeSave: false });
+
+  const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+  const message = `
+    Vous recevez cet email car une demande de compte sur Match My Pace a été faite avec cette adresse.
+    Veuillez cliquer sur le lien ci-dessous pour vérifier votre adresse e-mail:
+    ${verificationUrl}
+
+    Si vous n'êtes pas à l'origine de cette demande, veuillez ignorer cet email.
+  `;
+
+  try {
+    await sendGridEmail(
+      user.email,
+      'Vérification de votre adresse e-mail',
+      message,
+      `<p>${message.replace(/\n/g, '<br>')}</p>`
+    );
+  } catch (err) {
+    console.error(err);
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+    throw new Error('Email could not be sent');
+  }
+};
 
 // @route   POST /api/auth/register
 // @desc    Register a new user
@@ -23,47 +53,22 @@ const register = async (req, res) => {
     }
 
     if (user && !user.isVerified) {
-      // Potentially resend verification email if the user exists but is not verified
-    } else {
+      // User exists but is not verified, resend verification email
+    } else if (!user) {
       user = await User.create({
         email,
         password,
       });
     }
 
-    // Get verification token
-    const verificationToken = user.getVerificationToken();
-
-    await user.save({ validateBeforeSave: false });
-
-    // Create verification url
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
-
-    const message = `
-      Vous recevez cet email car vous avez demandé la création d'un compte sur Match My Pace.
-      Veuillez cliquer sur le lien ci-dessous pour vérifier votre adresse e-mail:
-      ${verificationUrl}
-
-      Si vous n'avez pas demandé la création d'un compte, veuillez ignorer cet email.
-    `;
-
     try {
-      await sendEmail({
-        email: user.email,
-        subject: 'Vérification de votre adresse e-mail',
-        message,
-      });
-
+      await sendVerificationEmail(user);
       res.status(200).json({
         success: true,
-        data: 'Email sent',
+        data: 'Verification email sent. Please check your inbox.',
       });
-    } catch (err) {
-      console.error(err);
-      user.verificationToken = undefined;
-      user.verificationTokenExpires = undefined;
-      await user.save({ validateBeforeSave: false });
-      return res.status(500).json({ message: 'Email could not be sent' });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
     }
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -97,7 +102,14 @@ const login = async (req, res) => {
 
     // Check if user is verified
     if (user.isVerified === false) {
-      return res.status(401).json({ message: 'Please verify your email to log in' });
+      try {
+        await sendVerificationEmail(user);
+        return res.status(401).json({
+          message: 'Please verify your email to log in. A new verification email has been sent to your inbox.',
+        });
+      } catch (error) {
+        return res.status(500).json({ message: error.message });
+      }
     }
 
     res.json({
@@ -191,11 +203,12 @@ const forgotPassword = async (req, res) => {
     `;
 
     try {
-      await sendEmail({
-        email: user.email,
-        subject: 'Réinitialisation de votre mot de passe',
+      await sendGridEmail(
+        user.email,
+        'Réinitialisation de votre mot de passe',
         message,
-      });
+        `<p>${message.replace(/\n/g, '<br>')}</p>`
+      );
 
       res.status(200).json({
         success: true,
