@@ -6,7 +6,9 @@ const { errorHandler } = require('./middleware/errorMiddleware');
 
 dotenv.config();
 
-connectDB();
+if (process.env.NODE_ENV !== 'test') {
+  connectDB();
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -24,6 +26,10 @@ app.use('/api/activities', require('./routes/activityRoutes'));
 // Error Handler Middleware
 app.use(errorHandler);
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+const server = app.listen(port, () => {
+  if (process.env.NODE_ENV !== 'test') {
+    console.log(`Server listening on port ${port}`);
+  }
 });
+
+module.exports = server;
