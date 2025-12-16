@@ -27,12 +27,41 @@ const addUserActivity = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const { title, type, duration, distance, calories, date } = req.body;
+  // Extract all potential fields from the request body
+  const {
+    type,
+    startTime,
+    endTime,
+    duration,
+    date,
+    source,
+    distance,
+    elevationGain,
+    avgSpeed,
+    poolLength,
+    laps,
+    exercises
+  } = req.body;
 
   try {
-    const activityData = { title, type, duration, distance, calories, date };
+    const activityData = {
+      type,
+      startTime,
+      endTime,
+      duration,
+      date,
+      source,
+      distance,
+      elevationGain,
+      avgSpeed,
+      poolLength,
+      laps,
+      exercises
+    };
+
+    // The service will handle creating the activity with the provided data
     const activity = await activityService.createActivity(activityData, req.user.id);
-    res.json(activity);
+    res.status(201).json(activity);
   } catch (error) {
     console.error(error.message);
     res.status(500).send('Server Error');

@@ -1,41 +1,88 @@
 const mongoose = require('mongoose');
 
+// Sous-schéma pour les exercices de musculation
+const exerciseSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  sets: {
+    type: Number,
+    min: 0,
+  },
+  reps: {
+    type: Number,
+    min: 0,
+  },
+  weight: {
+    type: Number,
+    min: 0,
+  },
+});
+
 const activitySchema = new mongoose.Schema({
+  // --- Champs communs ---
   user: {
     type: mongoose.Schema.Types.ObjectId,
     required: true,
     ref: 'User',
   },
-  title: {
-    type: String,
-    required: [true, 'Please add a title'],
-    trim: true,
-    maxlength: [100, 'Title cannot be more than 100 characters'],
-  },
   type: {
     type: String,
-    required: [true, 'Please add an activity type'],
-    enum: ['course', 'velo', 'natation', 'marche'],
+    required: true,
+    enum: ['cycling', 'running', 'walking', 'swimming', 'workout'],
+  },
+  startTime: {
+    type: Date,
+    required: true,
+  },
+  endTime: {
+    type: Date,
+    required: true,
   },
   duration: {
-    type: Number,
-    required: [true, 'Please add a duration in minutes'],
-    min: [0, 'Duration must be a positive number'],
-  },
-  distance: {
-    type: Number,
-    required: false,
-    min: [0, 'Distance must be a positive number'],
-  },
-  calories: {
-    type: Number,
-    required: false,
-    min: [0, 'Calories must be a positive number'],
+    type: Number, // en minutes
+    required: true,
+    min: 0,
   },
   date: {
-    type: Date,
-    default: Date.now,
+    type: Date, // pour les requêtes de classement
+    required: true,
   },
+  source: {
+    type: String,
+    required: true,
+    enum: ['manual', 'tracked'],
+  },
+
+  // --- Champs spécifiques ---
+  // Pour cycling, running, walking
+  distance: {
+    type: Number,
+    min: 0,
+  },
+  elevationGain: { // D+ en mètres
+    type: Number,
+    min: 0,
+  },
+  avgSpeed: { // en km/h
+    type: Number,
+    min: 0,
+  },
+
+  // Pour swimming (en plus de distance)
+  poolLength: { // en mètres
+    type: Number,
+    min: 0,
+  },
+  laps: {
+    type: Number,
+    min: 0,
+  },
+
+  // Pour workout
+  exercises: [exerciseSchema],
 }, {
   timestamps: true,
 });

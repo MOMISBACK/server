@@ -8,6 +8,27 @@ const {
   deleteUserActivity,
 } = require('../controllers/activityController');
 
+// Validation rules for creating a new activity
+const createActivityValidationRules = [
+  body('type').isIn(['cycling', 'running', 'walking', 'swimming', 'workout']),
+  body('startTime').isISO8601().toDate(),
+  body('endTime').isISO8601().toDate(),
+  body('duration').isFloat({ gt: 0 }),
+  body('date').isISO8601().toDate(),
+  body('source').isIn(['manual', 'tracked']),
+  body('distance').optional().isFloat({ gt: 0 }),
+  body('elevationGain').optional().isFloat({ gt: 0 }),
+  body('avgSpeed').optional().isFloat({ gt: 0 }),
+  body('poolLength').optional().isFloat({ gt: 0 }),
+  body('laps').optional().isInt({ gt: 0 }),
+  body('exercises').optional().isArray(),
+  body('exercises.*.name').optional().notEmpty().trim(),
+  body('exercises.*.sets').optional().isInt({ gt: 0 }),
+  body('exercises.*.reps').optional().isInt({ gt: 0 }),
+  body('exercises.*.weight').optional().isFloat({ gt: 0 }),
+];
+
+
 // @route   GET /api/activities
 // @desc    Get user activities
 // @access  Private
@@ -19,14 +40,7 @@ router.get('/', protect, getUserActivities);
 router.post(
   '/',
   protect,
-  [
-    body('title').not().isEmpty().trim().escape(),
-    body('type').isIn(['course', 'velo', 'natation', 'marche']),
-    body('duration').isFloat({ gt: 0 }),
-    body('distance').optional().isFloat({ gt: 0 }),
-    body('calories').optional().isFloat({ gt: 0 }),
-    body('date').optional().isISO8601().toDate(),
-  ],
+  createActivityValidationRules,
   addUserActivity
 );
 
