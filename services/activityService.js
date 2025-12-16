@@ -38,7 +38,7 @@ const createActivity = async (activityData) => {
 
     // On ne vérifie que les champs spécifiques à une activité
     const specificFieldsInRequest = Object.keys(activityData).filter(key =>
-      !['user', 'userId', 'type', 'startTime', 'endTime', 'date', 'source'].includes(key)
+      !['user', 'userId', 'type', 'startTime', 'endTime', 'date', 'source','title', 'duration'].includes(key)
     );
 
     for (const field of specificFieldsInRequest) {
