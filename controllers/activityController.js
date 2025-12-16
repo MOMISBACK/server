@@ -4,23 +4,31 @@ const activityService = require('../services/activityService');
  * Creates a new activity.
  */
 const createActivity = async (req, res) => {
+  console.log('--- New Activity Creation Request ---');
+  console.log('Received payload:', JSON.stringify(req.body, null, 2));
+
   try {
-    const activityData = req.body;
-    // Attach user ID from the authenticated user (provided by the 'protect' middleware)
-    activityData.user = req.user.id;
+    const activityData = { ...req.body, user: req.user.id };
 
     const activity = await activityService.createActivity(activityData);
     res.status(201).json(activity);
   } catch (error) {
-    // Log the specific error to the console for debugging
-    console.error('Error creating activity:', error.message);
+    console.error('--- Activity Creation Failed ---');
+    console.error('Error Type:', error.name);
+    console.error('Error Message:', error.message);
 
-    // Handle potential validation errors from the service
     if (error.name === 'ValidationError') {
-      return res.status(400).json({ message: error.message });
+      // Log the full validation error for detailed debugging
+      console.error('Validation Error Details:', JSON.stringify(error.errors, null, 2));
+      return res.status(400).json({
+        message: 'Validation failed. Please check your data.',
+        details: error.errors,
+      });
     }
-    // Handle other potential errors
-    res.status(500).json({ message: 'Server Error', error: error.message });
+
+    // Log the full error object for any other type of error
+    console.error('Full Error Object:', error);
+    res.status(500).json({ message: 'An unexpected server error occurred.' });
   }
 };
 
