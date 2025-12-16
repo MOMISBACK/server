@@ -28,10 +28,15 @@ const activitySchema = new mongoose.Schema({
     required: true,
     ref: 'User',
   },
+  title: {
+    type: String,
+    required: true,
+    trim: true,
+  },
   type: {
     type: String,
     required: true,
-    enum: ['cycling', 'running', 'walking', 'swimming', 'workout'],
+    enum: ['cycling', 'running', 'walking', 'swimming', 'workout', 'yoga'],
   },
   startTime: {
     type: Date,

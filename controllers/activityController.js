@@ -8,7 +8,40 @@ const createActivity = async (req, res) => {
   console.log('Received payload:', JSON.stringify(req.body, null, 2));
 
   try {
-    const activityData = { ...req.body, user: req.user.id };
+    // Destructure only the expected fields from the request body
+    const {
+      title,
+      type,
+      duration,
+      date,
+      distance,
+      elevationGain,
+      exercises,
+      startTime,
+      endTime,
+      source,
+      avgSpeed,
+      poolLength,
+      laps,
+    } = req.body;
+
+    // Build the activity data object to align with the new schema
+    const activityData = {
+      user: req.user.id,
+      title,
+      type,
+      duration,
+      date,
+      distance,
+      elevationGain,
+      exercises,
+      startTime,
+      endTime,
+      source,
+      avgSpeed,
+      poolLength,
+      laps,
+    };
 
     const activity = await activityService.createActivity(activityData);
     res.status(201).json(activity);
