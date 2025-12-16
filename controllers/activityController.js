@@ -12,6 +12,9 @@ const createActivity = async (req, res) => {
     const activity = await activityService.createActivity(activityData);
     res.status(201).json(activity);
   } catch (error) {
+    // Log the specific error to the console for debugging
+    console.error('Error creating activity:', error.message);
+
     // Handle potential validation errors from the service
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: error.message });

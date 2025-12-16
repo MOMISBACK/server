@@ -7,7 +7,6 @@ const {
   getActivityById,
   deleteActivity,
 } = require('../controllers/activityController');
-const { body } = require('express-validator');
 
 // Apply the authentication middleware to all routes in this file
 router.use(protect);
