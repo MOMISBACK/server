@@ -40,11 +40,9 @@ const activitySchema = new mongoose.Schema({
   },
   startTime: {
     type: Date,
-    required: true,
   },
   endTime: {
     type: Date,
-    required: true,
   },
   duration: {
     type: Number, // en minutes
@@ -57,7 +55,6 @@ const activitySchema = new mongoose.Schema({
   },
   source: {
     type: String,
-    required: true,
     enum: ['manual', 'tracked'],
   },
 
