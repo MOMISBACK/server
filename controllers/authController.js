@@ -38,14 +38,14 @@ const sendVerificationEmail = async (user) => {
 // @desc    Register a new user
 // @access  Public
 const register = async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-
-  const { email, password } = req.body;
-
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password } = req.body;
+
     let user = await User.findOne({ email });
 
     if (user && user.isVerified) {
@@ -61,17 +61,19 @@ const register = async (req, res) => {
       });
     }
 
-    try {
-      await sendVerificationEmail(user);
-      res.status(200).json({
-        success: true,
-        data: 'Verification email sent. Please check your inbox.',
-      });
-    } catch (error) {
-      return res.status(500).json({ message: error.message });
-    }
+    await sendVerificationEmail(user);
+    res.status(200).json({
+      success: true,
+      data: 'Verification email sent. Please check your inbox.',
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(error);
+    if (error.message === 'Email could not be sent') {
+      return res
+        .status(500)
+        .json({ message: 'Error sending verification email.' });
+    }
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
@@ -79,14 +81,14 @@ const register = async (req, res) => {
 // @desc    Authenticate user & get token
 // @access  Public
 const login = async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-
-  const { email, password } = req.body;
-
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password } = req.body;
+
     const user = await User.findOne({ email });
 
     if (!user) {
@@ -102,14 +104,13 @@ const login = async (req, res) => {
 
     // Check if user is verified
     if (user.isVerified === false) {
-      try {
-        await sendVerificationEmail(user);
-        return res.status(401).json({
-          message: 'Please verify your email to log in. A new verification email has been sent to your inbox.',
+      await sendVerificationEmail(user);
+      return res
+        .status(401)
+        .json({
+          message:
+            'Please verify your email to log in. A new verification email has been sent to your inbox.',
         });
-      } catch (error) {
-        return res.status(500).json({ message: error.message });
-      }
     }
 
     res.json({
@@ -118,7 +119,13 @@ const login = async (req, res) => {
       token: generateToken(user._id),
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(error);
+    if (error.message === 'Email could not be sent') {
+      return res
+        .status(500)
+        .json({ message: 'Error sending verification email.' });
+    }
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
@@ -133,20 +140,18 @@ const getMe = (req, res) => {
 // @desc    Verify email address
 // @access  Public
 const verifyEmail = async (req, res) => {
-  // Get token from req.query
-  const token = req.query.token;
-
-  if (!token) {
-    return res.status(400).json({ message: 'Invalid token' });
-  }
-
-  // Hash the token to compare with the one in the database
-  const verificationToken = crypto
-    .createHash('sha256')
-    .update(token)
-    .digest('hex');
-
   try {
+    const token = req.query.token;
+
+    if (!token) {
+      return res.status(400).json({ message: 'Invalid token' });
+    }
+
+    const verificationToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
     const user = await User.findOne({
       verificationToken,
       verificationTokenExpires: { $gt: Date.now() },
@@ -163,7 +168,8 @@ const verifyEmail = async (req, res) => {
 
     res.status(200).json({ success: true, data: 'Email verified successfully' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
@@ -171,29 +177,21 @@ const verifyEmail = async (req, res) => {
 // @desc    Forgot password
 // @access  Public
 const forgotPassword = async (req, res) => {
-  const { email } = req.body;
-
   try {
+    const { email } = req.body;
     const user = await User.findOne({ email });
 
     if (!user || !user.isVerified) {
-      // Send a generic message to prevent user enumeration
-      return res
-        .status(200)
-        .json({
-          success: true,
-          data: 'If an account with that email exists, a password reset email has been sent.',
-        });
+      return res.status(200).json({
+        success: true,
+        data: 'If an account with that email exists, a password reset email has been sent.',
+      });
     }
 
-    // Get reset token
     const resetToken = user.getResetPasswordToken();
-
     await user.save({ validateBeforeSave: false });
 
-    // Create reset url
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-
     const message = `
       Vous recevez cet email car vous avez demandé la réinitialisation de votre mot de passe pour votre compte sur Match My Pace.
       Veuillez cliquer sur le lien ci-dessous pour réinitialiser votre mot de passe:
@@ -202,41 +200,44 @@ const forgotPassword = async (req, res) => {
       Si vous n'avez pas demandé cette réinitialisation, veuillez ignorer cet email.
     `;
 
-    try {
-      await sendGridEmail(
-        user.email,
-        'Réinitialisation de votre mot de passe',
-        message,
-        `<p>${message.replace(/\n/g, '<br>')}</p>`
-      );
+    await sendGridEmail(
+      user.email,
+      'Réinitialisation de votre mot de passe',
+      message,
+      `<p>${message.replace(/\n/g, '<br>')}</p>`
+    );
 
-      res.status(200).json({
-        success: true,
-        data: 'Email sent',
-      });
-    } catch (err) {
-      console.error(err);
-      user.resetPasswordToken = undefined;
-      user.resetPasswordExpires = undefined;
-      await user.save({ validateBeforeSave: false });
-      return res.status(500).json({ message: 'Email could not be sent' });
-    }
+    res.status(200).json({
+      success: true,
+      data: 'Email sent',
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(error);
+
+    // Attempt to reset the token fields if email sending fails
+    const { email } = req.body;
+    const userToUpdate = await User.findOne({ email });
+    if (userToUpdate) {
+      userToUpdate.resetPasswordToken = undefined;
+      userToUpdate.resetPasswordExpires = undefined;
+      await userToUpdate.save({ validateBeforeSave: false });
+    }
+
+    res.status(500).json({ message: 'Email could not be sent' });
   }
 };
+
 
 // @route   PUT /api/auth/reset-password/:token
 // @desc    Reset password
 // @access  Public
 const resetPassword = async (req, res) => {
-  // Get hashed token
-  const resetPasswordToken = crypto
-    .createHash('sha256')
-    .update(req.params.token)
-    .digest('hex');
-
   try {
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.token)
+      .digest('hex');
+
     const user = await User.findOne({
       resetPasswordToken,
       resetPasswordExpires: { $gt: Date.now() },
@@ -246,7 +247,6 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired token' });
     }
 
-    // Set new password
     user.password = req.body.password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
@@ -257,7 +257,8 @@ const resetPassword = async (req, res) => {
       data: 'Password updated successfully',
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
@@ -265,23 +266,20 @@ const resetPassword = async (req, res) => {
 // @desc    Update user password
 // @access  Private
 const updatePassword = async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-
   try {
+    const { currentPassword, newPassword } = req.body;
     const user = await User.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Check if current password matches
     const isMatch = await user.matchPassword(currentPassword);
 
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid current password' });
     }
 
-    // Set new password
     user.password = newPassword;
     await user.save();
 
@@ -290,7 +288,8 @@ const updatePassword = async (req, res) => {
       data: 'Password updated successfully',
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
