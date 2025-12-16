@@ -1,25 +1,57 @@
 const Activity = require('../models/Activity');
+const activityTypeConfig = require('../utils/activityTypeConfig');
+
+// Classe d'erreur personnalisée pour les erreurs de validation
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ValidationError';
+    this.statusCode = 400;
+  }
+}
 
 /**
- * Gets all activities for a specific user.
- * @param {string} userId - The ID of the user.
+ * Gets activities based on a query object.
+ * @param {object} query - The query object for filtering activities (e.g., { userId, type }).
  * @returns {Promise<Activity[]>} A list of activities.
  */
-const getActivitiesByUser = async (userId) => {
-  return await Activity.find({ user: userId }).sort({ date: -1 });
+const getActivities = async (query) => {
+  return await Activity.find(query).sort({ startTime: -1 });
 };
 
 /**
- * Creates a new activity.
- * @param {object} activityData - The data for the new activity.
- * @param {string} userId - The ID of the user creating the activity.
+ * Creates a new activity after validating its fields based on type.
+ * @param {object} activityData - The data for the new activity, including userId.
  * @returns {Promise<Activity>} The newly created activity.
  */
-const createActivity = async (activityData, userId) => {
-  const newActivity = new Activity({
-    ...activityData,
-    user: userId,
-  });
+const createActivity = async (activityData) => {
+  // --- Validation dynamique pour les entrées manuelles ---
+  if (activityData.source === 'manual') {
+    const { type } = activityData;
+    const config = activityTypeConfig[type];
+
+    if (!config) {
+      throw new ValidationError(`Le type d'activité '${type}' est invalide.`);
+    }
+
+    const allowedFields = new Set(config.allowed);
+
+    // On ne vérifie que les champs spécifiques à une activité
+    const specificFieldsInRequest = Object.keys(activityData).filter(key =>
+      !['user', 'userId', 'type', 'startTime', 'endTime', 'date', 'source'].includes(key)
+    );
+
+    for (const field of specificFieldsInRequest) {
+      if (activityData[field] !== undefined && activityData[field] !== null) {
+        if (!allowedFields.has(field)) {
+          throw new ValidationError(`Le champ '${field}' n'est pas applicable pour le type '${type}'.`);
+        }
+      }
+    }
+  }
+
+  // --- Création de l'activité ---
+  const newActivity = new Activity(activityData);
   return await newActivity.save();
 };
 
@@ -28,7 +60,7 @@ const createActivity = async (activityData, userId) => {
  * @param {string} activityId - The ID of the activity.
  * @returns {Promise<Activity|null>} The found activity or null.
  */
-const findActivityById = async (activityId) => {
+const getActivityById = async (activityId) => {
   return await Activity.findById(activityId);
 };
 
@@ -41,8 +73,8 @@ const deleteActivityById = async (activityId) => {
 };
 
 module.exports = {
-  getActivitiesByUser,
+  getActivities,
   createActivity,
-  findActivityById,
+  getActivityById,
   deleteActivityById,
 };

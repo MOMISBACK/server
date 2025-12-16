@@ -1,105 +1,92 @@
-const { validationResult } = require('express-validator');
 const activityService = require('../services/activityService');
 
 /**
- * Handles getting all activities for the logged-in user.
- * @param {object} req - Express request object.
- * @param {object} res - Express response object.
+ * Creates a new activity.
  */
-const getUserActivities = async (req, res) => {
+const createActivity = async (req, res) => {
   try {
-    const activities = await activityService.getActivitiesByUser(req.user.id);
-    res.json(activities);
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).send('Server Error');
-  }
-};
+    const activityData = req.body;
+    // Attach user ID from the authenticated user (provided by the 'protect' middleware)
+    activityData.user = req.user.id;
 
-/**
- * Handles the creation of a new activity.
- * @param {object} req - Express request object.
- * @param {object} res - Express response object.
- */
-const addUserActivity = async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-
-  // Extract all potential fields from the request body
-  const {
-    type,
-    startTime,
-    endTime,
-    duration,
-    date,
-    source,
-    distance,
-    elevationGain,
-    avgSpeed,
-    poolLength,
-    laps,
-    exercises
-  } = req.body;
-
-  try {
-    const activityData = {
-      type,
-      startTime,
-      endTime,
-      duration,
-      date,
-      source,
-      distance,
-      elevationGain,
-      avgSpeed,
-      poolLength,
-      laps,
-      exercises
-    };
-
-    // The service will handle creating the activity with the provided data
-    const activity = await activityService.createActivity(activityData, req.user.id);
+    const activity = await activityService.createActivity(activityData);
     res.status(201).json(activity);
   } catch (error) {
-    console.error(error.message);
-    res.status(500).send('Server Error');
+    // Handle potential validation errors from the service
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
+    // Handle other potential errors
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 
 /**
- * Handles the deletion of an activity.
- * @param {object} req - Express request object.
- * @param {object} res - Express response object.
+ * Gets all activities for the logged-in user, with optional filtering by type.
  */
-const deleteUserActivity = async (req, res) => {
+const getActivities = async (req, res) => {
   try {
-    const activity = await activityService.findActivityById(req.params.id);
+    const { type } = req.query;
+    const query = { user: req.user.id };
+
+    if (type) {
+      query.type = type;
+    }
+
+    const activities = await activityService.getActivities(query);
+    res.status(200).json(activities);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+/**
+ * Gets a single activity by its ID.
+ */
+const getActivityById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const activity = await activityService.getActivityById(id);
 
     if (!activity) {
-      return res.status(404).json({ msg: 'Activity not found' });
+      return res.status(404).json({ message: 'Activity not found' });
     }
 
-    // Make sure user owns the activity
+    // Optional: Check if the activity belongs to the user
     if (activity.user.toString() !== req.user.id) {
-      return res.status(401).json({ msg: 'Not authorized' });
+      return res.status(403).json({ message: 'User not authorized to access this activity' });
     }
 
-    await activityService.deleteActivityById(req.params.id);
-
-    res.json({ msg: 'Activity removed' });
+    res.status(200).json(activity);
   } catch (error) {
-    console.error(error.message);
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ msg: 'Activity not found' });
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+
+const deleteActivity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const activity = await activityService.getActivityById(id);
+
+    if (!activity) {
+      return res.status(404).json({ message: 'Activity not found' });
     }
-    res.status(500).send('Server Error');
+
+    if (activity.user.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'User not authorized to delete this activity' });
+    }
+
+    await activityService.deleteActivityById(id);
+    res.status(200).json({ message: 'Activity deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 
 module.exports = {
-  getUserActivities,
-  addUserActivity,
-  deleteUserActivity,
+  createActivity,
+  getActivities,
+  getActivityById,
+  deleteActivity,
 };
