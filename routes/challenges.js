@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const challengeService = require('../services/challengeService');
-const authMiddleware = require('../middleware/authMiddleware');
+const { protect } = require('../middleware/authMiddleware'); // ⭐ LIGNE 4 MODIFIÉE
 
 // Toutes les routes nécessitent l'authentification
-router.use(authMiddleware);
+router.use(protect); // ⭐ LIGNE 7 MODIFIÉE
 
 /**
  * GET /api/challenges/current
