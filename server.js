@@ -19,7 +19,7 @@ connectDB().catch((err) => {
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ⭐ AJOUTE CETTE LIGNE ICI (pour Render/Proxy)
+// Trust proxy pour Render
 app.set('trust proxy', 1);
 
 // ===== MIDDLEWARES DE SÉCURITÉ =====
@@ -29,15 +29,17 @@ app.use(helmet());
 
 // Configuration CORS
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: process.env.NODE_ENV === 'development' 
+    ? '*' 
+    : process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true,
   optionsSuccessStatus: 200
 }));
 
 // Limitation du taux de requêtes (anti-spam/DDoS)
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requêtes max par IP
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Trop de requêtes, veuillez réessayer plus tard.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -97,3 +99,28 @@ const server = app.listen(port, () => {
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM reçu, fermeture du serveur...');
   server.close(() => {
+    console.log('✅ Serveur fermé proprement');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('👋 SIGINT reçu, fermeture du serveur...');
+  server.close(() => {
+    console.log('✅ Serveur fermé proprement');
+    process.exit(0);
+  });
+});
+
+// Gestion des erreurs non capturées
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Erreur non gérée (Unhandled Rejection):', err);
+  server.close(() => process.exit(1));
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Exception non capturée (Uncaught Exception):', err);
+  process.exit(1);
+});
+
+module.exports = app;
