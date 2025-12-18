@@ -1,3 +1,5 @@
+// validators/activityValidator.js
+
 const { body, validationResult } = require('express-validator');
 
 /**
@@ -22,8 +24,10 @@ const validateActivityFields = (req, res, next) => {
     return next(); // La validation du type se fera après
   }
 
+  // ⭐ CORRECTION : Ajouter user, userId, notes
   const allowedFields = [
     'type', 'title', 'duration', 'date', 'startTime', 'endTime', 'source',
+    'user', 'userId', 'notes', // ⭐ AJOUTÉ
     ...ALLOWED_FIELDS[type]
   ];
 
@@ -77,6 +81,14 @@ const commonValidation = [
     .optional()
     .isISO8601().withMessage('Format endTime invalide')
     .toDate(),
+  
+  // ⭐ AJOUT : Validation pour notes (optionnel)
+  body('notes')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Les notes ne doivent pas dépasser 500 caractères')
+    .escape(),
 ];
 
 /**
