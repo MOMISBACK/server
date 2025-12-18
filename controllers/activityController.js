@@ -4,8 +4,6 @@ const activityService = require('../services/activityService');
  * Creates a new activity.
  */
 const createActivity = async (req, res) => {
-  console.log('--- New Activity Creation Request ---');
-  console.log('Received payload:', JSON.stringify(req.body, null, 2));
 
   try {
     // Destructure only the expected fields from the request body
