@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const challengeService = require('../services/challengeService');
-const authMiddleware = require('../middleware/auth');
+const authMiddleware = require('../middleware/authMiddleware');
 
 // Toutes les routes nécessitent l'authentification
 router.use(authMiddleware);
