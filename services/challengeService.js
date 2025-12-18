@@ -64,8 +64,9 @@ async function calculateProgress(userId, challenge) {
     goalValue: challenge.goalValue
   });
 
+  // ⭐ CORRECTION : user au lieu de userId
   const activities = await Activity.find({
-    userId,
+    user: userId,
     date: {
       $gte: challenge.startDate,
       $lt: challenge.endDate
@@ -86,7 +87,7 @@ async function calculateProgress(userId, challenge) {
   });
 
   // ⭐ LOG 3 : Vérifier TOUTES les activités de l'user (debug)
-  const allUserActivities = await Activity.find({ userId });
+  const allUserActivities = await Activity.find({ user: userId });
   console.log('🔍 TOUTES les activités de l\'user:', {
     total: allUserActivities.length,
     détails: allUserActivities.map(a => ({
@@ -211,8 +212,9 @@ async function getSuggestions(userId) {
   const fourWeeksAgo = new Date();
   fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
   
+  // ⭐ CORRECTION : user au lieu de userId
   const recentActivities = await Activity.find({
-    userId,
+    user: userId,
     date: { $gte: fourWeeksAgo }
   });
   
