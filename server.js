@@ -19,6 +19,9 @@ connectDB().catch((err) => {
 const app = express();
 const port = process.env.PORT || 3000;
 
+// ⭐ AJOUTE CETTE LIGNE ICI (pour Render/Proxy)
+app.set('trust proxy', 1);
+
 // ===== MIDDLEWARES DE SÉCURITÉ =====
 
 // Protection des en-têtes HTTP
@@ -94,28 +97,3 @@ const server = app.listen(port, () => {
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM reçu, fermeture du serveur...');
   server.close(() => {
-    console.log('✅ Serveur fermé proprement');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('👋 SIGINT reçu, fermeture du serveur...');
-  server.close(() => {
-    console.log('✅ Serveur fermé proprement');
-    process.exit(0);
-  });
-});
-
-// Gestion des erreurs non capturées
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Erreur non gérée (Unhandled Rejection):', err);
-  server.close(() => process.exit(1));
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Exception non capturée (Uncaught Exception):', err);
-  process.exit(1);
-});
-
-module.exports = app;
