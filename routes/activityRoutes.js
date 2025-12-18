@@ -1,20 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/authMiddleware');
-const {
-  createActivity,
-  getActivities,
-  getActivityById,
-  deleteActivity,
-} = require('../controllers/activityController');
+const activityController = require('../controllers/activityController');
+const { validateCreateActivity } = require('../validators/activityValidators');
 
-// Apply the authentication middleware to all routes in this file
+// Toutes les routes nécessitent une authentification
 router.use(protect);
 
-// Define the routes
-router.post('/', createActivity);
-router.get('/', getActivities);
-router.get('/:id', getActivityById);
-router.delete('/:id', deleteActivity);
+// Routes
+router.get('/', activityController.getActivities); // ✅ Corrigé : getActivities (pas getUserActivities)
+router.post('/', validateCreateActivity, activityController.createActivity);
+router.delete('/:id', activityController.deleteActivity);
 
 module.exports = router;

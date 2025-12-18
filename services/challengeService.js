@@ -1,15 +1,10 @@
-// server/services/challengeService.js
-
 const WeeklyChallenge = require('../models/WeeklyChallenge');
 const Activity = require('../models/Activity');
 
-/**
- * Calcule le début de la semaine en cours (dernier lundi à 00h00)
- */
 function getCurrentWeekStart() {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0 = dimanche
-  const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Lundi = référence
+  const dayOfWeek = now.getDay();
+  const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
   
   const monday = new Date(now);
   monday.setDate(now.getDate() - daysToSubtract);
@@ -18,9 +13,6 @@ function getCurrentWeekStart() {
   return monday;
 }
 
-/**
- * Calcule la fin de la semaine (lundi suivant à 00h00)
- */
 function getCurrentWeekEnd() {
   const start = getCurrentWeekStart();
   const end = new Date(start);
@@ -28,9 +20,6 @@ function getCurrentWeekEnd() {
   return end;
 }
 
-/**
- * Récupère le défi actif de la semaine en cours
- */
 async function getCurrentChallenge(userId) {
   const weekStart = getCurrentWeekStart();
   
@@ -41,7 +30,6 @@ async function getCurrentChallenge(userId) {
   
   if (!challenge) return null;
   
-  // Calculer la progression
   const progress = await calculateProgress(userId, challenge);
   
   return {
@@ -50,12 +38,9 @@ async function getCurrentChallenge(userId) {
   };
 }
 
-/**
- * Calcule la progression du défi basée sur les activités de la semaine
- */
 async function calculateProgress(userId, challenge) {
-  // ⭐ LOG 1 : Paramètres de recherche
-  console.log('📊 Calcul progression - Paramètres:', {
+  // Debug (optionnel)
+  console.log('calculateProgress:', {
     userId: userId.toString(),
     startDate: challenge.startDate.toISOString(),
     endDate: challenge.endDate.toISOString(),
@@ -64,7 +49,6 @@ async function calculateProgress(userId, challenge) {
     goalValue: challenge.goalValue
   });
 
-  // ⭐ CORRECTION : user au lieu de userId
   const activities = await Activity.find({
     user: userId,
     date: {
@@ -74,8 +58,8 @@ async function calculateProgress(userId, challenge) {
     type: { $in: challenge.activityTypes }
   });
   
-  // ⭐ LOG 2 : Activités trouvées
-  console.log('📊 Activités trouvées:', {
+  // Debug (optionnel)
+  console.log('Activités trouvées:', {
     nombre: activities.length,
     détails: activities.map(a => ({
       id: a._id.toString(),
@@ -86,9 +70,10 @@ async function calculateProgress(userId, challenge) {
     }))
   });
 
-  // ⭐ LOG 3 : Vérifier TOUTES les activités de l'user (debug)
   const allUserActivities = await Activity.find({ user: userId });
-  console.log('🔍 TOUTES les activités de l\'user:', {
+  
+  // Debug (optionnel)
+  console.log('Toutes les activités utilisateur:', {
     total: allUserActivities.length,
     détails: allUserActivities.map(a => ({
       type: a.type,
@@ -115,8 +100,8 @@ async function calculateProgress(userId, challenge) {
   const percentage = Math.min((current / challenge.goalValue) * 100, 100);
   const isCompleted = current >= challenge.goalValue;
   
-  // ⭐ LOG 4 : Résultat final
-  console.log('✅ Résultat progression:', {
+  // Debug (optionnel)
+  console.log('Progression calculée:', {
     current: current.toFixed(2),
     goal: challenge.goalValue,
     percentage: percentage.toFixed(1) + '%',
@@ -132,22 +117,18 @@ async function calculateProgress(userId, challenge) {
   };
 }
 
-/**
- * Crée un nouveau défi
- */
 async function createChallenge(userId, challengeData) {
   const weekStart = getCurrentWeekStart();
   const weekEnd = getCurrentWeekEnd();
   
-  // ⭐ LOG : Création de défi
-  console.log('🎯 Création défi:', {
+  // Debug (optionnel)
+  console.log('createChallenge:', {
     userId: userId.toString(),
     weekStart: weekStart.toISOString(),
     weekEnd: weekEnd.toISOString(),
     ...challengeData
   });
   
-  // Vérifier qu'il n'existe pas déjà un défi cette semaine
   const existing = await WeeklyChallenge.findOne({
     userId,
     startDate: weekStart
@@ -168,9 +149,6 @@ async function createChallenge(userId, challengeData) {
   return challenge;
 }
 
-/**
- * Modifie le défi de la semaine en cours
- */
 async function updateChallenge(userId, challengeData) {
   const weekStart = getCurrentWeekStart();
   
@@ -187,9 +165,6 @@ async function updateChallenge(userId, challengeData) {
   return challenge;
 }
 
-/**
- * Supprime le défi de la semaine en cours
- */
 async function deleteChallenge(userId) {
   const weekStart = getCurrentWeekStart();
   
@@ -205,14 +180,10 @@ async function deleteChallenge(userId) {
   return result;
 }
 
-/**
- * Génère des suggestions basées sur l'historique
- */
 async function getSuggestions(userId) {
   const fourWeeksAgo = new Date();
   fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
   
-  // ⭐ CORRECTION : user au lieu de userId
   const recentActivities = await Activity.find({
     user: userId,
     date: { $gte: fourWeeksAgo }
@@ -222,7 +193,6 @@ async function getSuggestions(userId) {
     return getDefaultSuggestions();
   }
   
-  // Analyse des types les plus fréquents
   const typeStats = {};
   recentActivities.forEach(act => {
     if (!typeStats[act.type]) {
@@ -233,13 +203,11 @@ async function getSuggestions(userId) {
     typeStats[act.type].totalDuration += act.duration || 0;
   });
   
-  // Top 3 types d'activités
   const topTypes = Object.entries(typeStats)
     .sort((a, b) => b[1].count - a[1].count)
     .slice(0, 3)
     .map(([type]) => type);
   
-  // Moyennes hebdomadaires
   const avgWeeklyDistance = Object.values(typeStats).reduce((s, v) => s + v.totalDistance, 0) / 4;
   const avgWeeklyDuration = Object.values(typeStats).reduce((s, v) => s + v.totalDuration, 0) / 4;
   const avgWeeklyCount = recentActivities.length / 4;
@@ -250,28 +218,25 @@ async function getSuggestions(userId) {
       activityTypes: topTypes,
       goalType: 'distance',
       goalValue: Math.ceil(avgWeeklyDistance * 1.2),
-      icon: '🏃'
+      icon: 'trophy-outline'
     },
     {
       title: `${Math.ceil(avgWeeklyCount * 1.3)} activités`,
       activityTypes: topTypes,
       goalType: 'count',
       goalValue: Math.ceil(avgWeeklyCount * 1.3),
-      icon: '🎯'
+      icon: 'flag-outline'
     },
     {
       title: `${Math.ceil(avgWeeklyDuration * 1.1)} min d'effort`,
       activityTypes: topTypes,
       goalType: 'duration',
       goalValue: Math.ceil(avgWeeklyDuration * 1.1),
-      icon: '⏱️'
+      icon: 'flame-outline'
     }
   ];
 }
 
-/**
- * Suggestions par défaut (nouveaux utilisateurs)
- */
 function getDefaultSuggestions() {
   return [
     {
@@ -279,21 +244,21 @@ function getDefaultSuggestions() {
       activityTypes: ['running', 'walking'],
       goalType: 'count',
       goalValue: 3,
-      icon: '🎯'
+      icon: 'trophy-outline'
     },
     {
       title: '10 km de course',
       activityTypes: ['running'],
       goalType: 'distance',
       goalValue: 10,
-      icon: '🏃'
+      icon: 'flag-outline'
     },
     {
       title: '2h de sport',
       activityTypes: ['running', 'cycling', 'walking'],
       goalType: 'duration',
       goalValue: 120,
-      icon: '⏱️'
+      icon: 'flame-outline'
     }
   ];
 }
