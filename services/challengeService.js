@@ -1,3 +1,5 @@
+// server/services/challengeService.js
+
 const WeeklyChallenge = require('../models/WeeklyChallenge');
 const Activity = require('../models/Activity');
 
@@ -52,6 +54,16 @@ async function getCurrentChallenge(userId) {
  * Calcule la progression du défi basée sur les activités de la semaine
  */
 async function calculateProgress(userId, challenge) {
+  // ⭐ LOG 1 : Paramètres de recherche
+  console.log('📊 Calcul progression - Paramètres:', {
+    userId: userId.toString(),
+    startDate: challenge.startDate.toISOString(),
+    endDate: challenge.endDate.toISOString(),
+    typesRecherchés: challenge.activityTypes,
+    goalType: challenge.goalType,
+    goalValue: challenge.goalValue
+  });
+
   const activities = await Activity.find({
     userId,
     date: {
@@ -59,6 +71,30 @@ async function calculateProgress(userId, challenge) {
       $lt: challenge.endDate
     },
     type: { $in: challenge.activityTypes }
+  });
+  
+  // ⭐ LOG 2 : Activités trouvées
+  console.log('📊 Activités trouvées:', {
+    nombre: activities.length,
+    détails: activities.map(a => ({
+      id: a._id.toString(),
+      type: a.type,
+      date: a.date ? a.date.toISOString() : 'NO DATE',
+      distance: a.distance || 0,
+      duration: a.duration || 0
+    }))
+  });
+
+  // ⭐ LOG 3 : Vérifier TOUTES les activités de l'user (debug)
+  const allUserActivities = await Activity.find({ userId });
+  console.log('🔍 TOUTES les activités de l\'user:', {
+    total: allUserActivities.length,
+    détails: allUserActivities.map(a => ({
+      type: a.type,
+      date: a.date ? a.date.toISOString() : 'NO DATE',
+      distance: a.distance,
+      duration: a.duration
+    }))
   });
   
   let current = 0;
@@ -78,6 +114,14 @@ async function calculateProgress(userId, challenge) {
   const percentage = Math.min((current / challenge.goalValue) * 100, 100);
   const isCompleted = current >= challenge.goalValue;
   
+  // ⭐ LOG 4 : Résultat final
+  console.log('✅ Résultat progression:', {
+    current: current.toFixed(2),
+    goal: challenge.goalValue,
+    percentage: percentage.toFixed(1) + '%',
+    isCompleted
+  });
+  
   return {
     current: parseFloat(current.toFixed(2)),
     goal: challenge.goalValue,
@@ -93,6 +137,14 @@ async function calculateProgress(userId, challenge) {
 async function createChallenge(userId, challengeData) {
   const weekStart = getCurrentWeekStart();
   const weekEnd = getCurrentWeekEnd();
+  
+  // ⭐ LOG : Création de défi
+  console.log('🎯 Création défi:', {
+    userId: userId.toString(),
+    weekStart: weekStart.toISOString(),
+    weekEnd: weekEnd.toISOString(),
+    ...challengeData
+  });
   
   // Vérifier qu'il n'existe pas déjà un défi cette semaine
   const existing = await WeeklyChallenge.findOne({
