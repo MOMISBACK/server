@@ -1,64 +1,115 @@
+// server/models/WeeklyChallenge.js
+
 const mongoose = require('mongoose');
 
-const weeklyChallengeSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    index: true
-  },
-  
-  // Période du défi
-  startDate: {
-    type: Date,
-    required: true,
-    // Toujours un lundi à 00h00
-  },
-  endDate: {
-    type: Date,
-    required: true,
-    // Toujours le lundi suivant à 00h00
-  },
-  
-  // Configuration du défi
-  activityTypes: [{
-    type: String,
-    enum: ['running', 'cycling', 'walking', 'swimming', 'workout', 'yoga'],
-    required: true
-  }],
-  
-  goalType: {
+const goalSchema = new mongoose.Schema({
+  type: {
     type: String,
     enum: ['distance', 'duration', 'count'],
     required: true
   },
-  
-  goalValue: {
+  value: {
     type: Number,
     required: true,
-    min: 1
+    min: [0.1, 'La valeur doit être positive']
+  }
+}, { _id: false });
+
+const progressItemSchema = new mongoose.Schema({
+  goalType: {
+    type: String,
+    enum: ['distance', 'duration', 'count']
+  },
+  current: {
+    type: Number,
+    default: 0
+  },
+  goal: {
+    type: Number,
+    required: true
+  },
+  percentage: {
+    type: Number,
+    default: 0
+  },
+  isCompleted: {
+    type: Boolean,
+    default: false
+  }
+}, { _id: false });
+
+const weeklyChall engeSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  
+  // ⭐ Objectifs multiples
+  goals: {
+    type: [goalSchema],
+    required: true,
+    validate: {
+      validator: function(v) {
+        return v && v.length > 0;
+      },
+      message: 'Au moins un objectif requis'
+    }
+  },
+  
+  activityTypes: {
+    type: [String],
+    required: true,
+    enum: ['running', 'cycling', 'walking', 'swimming', 'yoga', 'fitness', 'other']
   },
   
   title: {
     type: String,
-    required: true,
-    maxlength: 100
+    required: true
   },
   
-  // Optionnel : emoji ou couleur
   icon: {
     type: String,
-    default: '🎯'
+    default: 'trophy-outline'
   },
   
+  startDate: {
+    type: Date,
+    required: true
+  },
+  
+  endDate: {
+    type: Date,
+    required: true
+  },
+  
+  // ⭐ Progression par objectif
+  progress: [progressItemSchema],
+  
+  // ⭐ Progression globale
+  overallProgress: {
+    completedGoals: {
+      type: Number,
+      default: 0
+    },
+    totalGoals: {
+      type: Number,
+      required: true
+    },
+    percentage: {
+      type: Number,
+      default: 0
+    },
+    isCompleted: {
+      type: Boolean,
+      default: false
+    }
+  }
 }, {
   timestamps: true
 });
 
-// Index composé pour garantir 1 seul défi actif par user/semaine
-weeklyChallengeSchema.index(
-  { userId: 1, startDate: 1 }, 
-  { unique: true }
-);
+// Index pour performance
+weeklyChallenge Schema.index({ user: 1, startDate: -1 });
 
 module.exports = mongoose.model('WeeklyChallenge', weeklyChallengeSchema);

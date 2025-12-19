@@ -1,7 +1,7 @@
 const request = require('supertest');
 const express = require('express');
 const activityRoutes = require('../routes/activityRoutes');
-const challengeRoutes = require('../routes/challenges');
+const challengeRoutes = require('../routes/challengeRoutes');
 const { createTestUserWithToken } = require('./helpers/authHelper');
 
 function createTestApp() {
