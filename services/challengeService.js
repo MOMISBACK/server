@@ -300,13 +300,33 @@ class ChallengeService {
       const player = challenge.players[i];
       const playerId = typeof player.user === 'string' ? player.user : player.user._id;
       
+      // ✅ Normaliser les dates : startDate à 00:00:00 et endDate à 23:59:59.999
+      const startDateNormalized = new Date(challenge.startDate);
+      startDateNormalized.setHours(0, 0, 0, 0);
+      
+      const endDateNormalized = new Date(challenge.endDate);
+      endDateNormalized.setHours(23, 59, 59, 999);
+      
       const activities = await Activity.find({
         user: playerId,
         date: {
-          $gte: challenge.startDate,
-          $lt: challenge.endDate
+          $gte: startDateNormalized,
+          $lte: endDateNormalized
         },
         type: { $in: challenge.activityTypes }
+      });
+
+      console.log(`📋 Activités trouvées pour ${playerId}:`, {
+        count: activities.length,
+        startDate: startDateNormalized.toISOString(),
+        endDate: endDateNormalized.toISOString(),
+        activityTypes: challenge.activityTypes,
+        activities: activities.map(a => ({
+          date: new Date(a.date).toISOString(),
+          type: a.type,
+          distance: a.distance,
+          duration: a.duration
+        }))
       });
 
       let current = 0;
