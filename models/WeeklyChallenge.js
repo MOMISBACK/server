@@ -198,11 +198,10 @@ weeklyChallengeSchema.methods.awardBonus = async function() {
 };
 
 // ✅ Hook pre-save : auto-calculer bonusEarned
-weeklyChallengeSchema.pre('save', function(next) {
+weeklyChallengeSchema.pre('save', function() {
   if (this.mode === 'duo' && !this.bonusAwarded) {
     this.bonusEarned = this.checkBonus();
   }
-  next();
 });
 
 // Configurer toJSON pour inclure les virtuals
