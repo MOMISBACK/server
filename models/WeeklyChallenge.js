@@ -126,7 +126,8 @@ const weeklyChallengeSchema = new mongoose.Schema({
   // ✅ COMPATIBILITÉ : Garder "user" pour les anciens challenges SOLO
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    ref: 'User',
+    sparse: true  // ✅ Permet plusieurs null values
   }
 }, {
   timestamps: true
@@ -136,6 +137,8 @@ const weeklyChallengeSchema = new mongoose.Schema({
 weeklyChallengeSchema.index({ creator: 1, createdAt: -1 });
 weeklyChallengeSchema.index({ 'players.user': 1, status: 1 });
 weeklyChallengeSchema.index({ status: 1, endDate: -1 });
+// ✅ Index sparse sur user pour éviter les doublons null
+weeklyChallengeSchema.index({ user: 1, startDate: 1 }, { sparse: true });
 
 // ✅ Méthode virtuelle : progression (rétrocompatibilité frontend SOLO)
 weeklyChallengeSchema.virtual('progress').get(function() {

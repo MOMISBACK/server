@@ -57,6 +57,19 @@ class ChallengeService {
       throw new Error('Vous ne pouvez pas vous inviter vous-même');
     }
 
+    // ✅ Vérifier qu'on n'a pas déjà un défi duo en attente
+    const existingPending = await WeeklyChallenge.findOne({
+      creator: creatorId,
+      mode: 'duo',
+      status: 'pending',
+      invitationStatus: 'pending',
+      endDate: { $gt: new Date() }
+    });
+
+    if (existingPending) {
+      throw new Error('Vous avez déjà une invitation en attente. Veuillez attendre la réponse.');
+    }
+
     const { startDate, endDate } = this._calculateWeekDates();
 
     const challenge = new WeeklyChallenge({
@@ -93,6 +106,11 @@ class ChallengeService {
       throw new Error('Ce challenge n\'est pas en mode duo');
     }
 
+    // ✅ Vérifier que le challenge est en attente
+    if (challenge.status !== 'pending' || challenge.invitationStatus !== 'pending') {
+      throw new Error('Cette invitation n\'est plus disponible');
+    }
+
     const isPlayer = challenge.players.some(p => p.user.toString() === userId);
     if (!isPlayer) {
       throw new Error('Vous n\'êtes pas invité à ce challenge');
@@ -100,6 +118,17 @@ class ChallengeService {
 
     if (challenge.creator.toString() === userId) {
       throw new Error('Vous ne pouvez pas accepter votre propre invitation');
+    }
+
+    // ✅ Vérifier que l'utilisateur n'a pas déjà un challenge actif
+    const userActiveChallenge = await WeeklyChallenge.findOne({
+      'players.user': userId,
+      status: 'active',
+      endDate: { $gt: new Date() }
+    });
+
+    if (userActiveChallenge) {
+      throw new Error('Vous avez déjà un challenge en cours');
     }
 
     challenge.status = 'active';
