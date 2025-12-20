@@ -23,11 +23,6 @@ beforeAll(async () => {
         count: 1,
         dbName: 'test',
       },
-      instanceOpts: [
-        {
-          port: 27018,
-        },
-      ],
     });
 
     const mongoUri = mongoServer.getUri();
