@@ -141,14 +141,23 @@ const weeklyChallengeSchema = new mongoose.Schema({
   },
   
   // ✅ COMPATIBILITÉ : Garder "user" pour les anciens challenges SOLO
-  user: {
+ user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    sparse: true  // ✅ Permet plusieurs null values
+    ref: 'User'
+    // PAS de sparse ici
   }
 }, {
   timestamps: true
 });
+
+// ✅ CORRECT: sparse sur l'INDEX
+weeklyChallengeSchema.index(
+  { user: 1, startDate: 1 }, 
+  { 
+    sparse: true,  // ← ICI est le bon endroit !
+    name: 'user_startDate_sparse'
+  }
+);
 
 // ✅ AMÉLIORÉ : Index composites pour performances
 weeklyChallengeSchema.index({ creator: 1, createdAt: -1 });
