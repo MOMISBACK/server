@@ -532,22 +532,33 @@ class ChallengeService {
     const now = new Date();
     const dayOfWeek = now.getDay();
     
-    let daysFromMonday;
+    // ✅ Le challenge commence AUJOURD'HUI
+    const startDate = new Date(now);
+    startDate.setHours(0, 0, 0, 0);
+    
+    // ✅ Le challenge se termine DIMANCHE MINUIT de cette semaine
+    // dayOfWeek: 0=dimanche, 1=lundi, ..., 6=samedi
+    let daysUntilSunday;
     if (dayOfWeek === 0) {
-      daysFromMonday = 6;
+      // Si on est dimanche, se termine dimanche minuit (0 jours)
+      daysUntilSunday = 0;
     } else {
-      daysFromMonday = dayOfWeek - 1;
+      // Sinon, se termine le dimanche prochain
+      daysUntilSunday = 7 - dayOfWeek;
     }
     
-    const thisMonday = new Date(now);
-    thisMonday.setDate(now.getDate() - daysFromMonday);
-    thisMonday.setHours(0, 0, 0, 0);
-    
-    const nextMonday = new Date(thisMonday);
-    nextMonday.setDate(thisMonday.getDate() + 7);
-    nextMonday.setHours(23, 59, 59, 999);
+    const endDate = new Date(now);
+    endDate.setDate(now.getDate() + daysUntilSunday);
+    endDate.setHours(23, 59, 59, 999);
 
-    return { startDate: thisMonday, endDate: nextMonday };
+    console.log('📅 [_calculateWeekDates] Période:', {
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
+      startDay: ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'][startDate.getDay()],
+      endDay: 'dimanche'
+    });
+
+    return { startDate, endDate };
   }
 }
 
