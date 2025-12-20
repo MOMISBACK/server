@@ -11,6 +11,7 @@ const authRoutes = require('./routes/authRoutes');
 const activityRoutes = require('./routes/activityRoutes');
 const challengeRoutes = require('./routes/challengeRoutes');
 const userRoutes = require('./routes/userRoutes');
+const adminRoutes = require('./routes/adminRoutes'); // ✅ AJOUTÉ
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes); // ✅ AJOUTÉ
 
 // Health check
 app.get('/health', (req, res) => {
