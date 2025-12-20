@@ -32,7 +32,7 @@ class ChallengeService {
       startDate,
       endDate,
       status: 'active',
-      user: userId  // Rétrocompatibilité
+      user: userId
     });
 
     await challenge.save();
@@ -48,7 +48,6 @@ class ChallengeService {
       throw new Error('Un objectif valide est requis');
     }
 
-    // Vérifier que le partenaire existe
     const partner = await User.findById(partnerId);
     if (!partner) {
       throw new Error('Partenaire introuvable');
@@ -73,7 +72,7 @@ class ChallengeService {
       icon,
       startDate,
       endDate,
-      status: 'pending',  // En attente d'acceptation
+      status: 'pending',
       invitationStatus: 'pending'
     });
 
@@ -94,13 +93,11 @@ class ChallengeService {
       throw new Error('Ce challenge n\'est pas en mode duo');
     }
 
-    // Vérifier que l'utilisateur est bien un joueur
     const isPlayer = challenge.players.some(p => p.user.toString() === userId);
     if (!isPlayer) {
       throw new Error('Vous n\'êtes pas invité à ce challenge');
     }
 
-    // Vérifier que ce n'est pas le créateur qui accepte
     if (challenge.creator.toString() === userId) {
       throw new Error('Vous ne pouvez pas accepter votre propre invitation');
     }
@@ -144,12 +141,13 @@ class ChallengeService {
 
   // ⭐ Calculer la progression d'un challenge
   async calculateProgress(userId) {
-    // Trouver le challenge actif de l'utilisateur (SOLO ou DUO accepté)
     const challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
       status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    })
+    .populate('players.user', 'email totalDiamonds')
+    .sort({ createdAt: -1 });
 
     if (!challenge) return null;
 
@@ -162,10 +160,10 @@ class ChallengeService {
     // Calculer pour chaque joueur
     for (let i = 0; i < challenge.players.length; i++) {
       const player = challenge.players[i];
+      const playerId = typeof player.user === 'string' ? player.user : player.user._id;
       
-      // Activités du joueur dans la période
       const activities = await Activity.find({
-        user: player.user,
+        user: playerId,
         date: {
           $gte: challenge.startDate,
           $lt: challenge.endDate
@@ -174,7 +172,7 @@ class ChallengeService {
       });
 
       console.log(`📊 Joueur ${i + 1}:`, {
-        userId: player.user,
+        userId: playerId,
         activitiesTrouvees: activities.length
       });
 
@@ -193,8 +191,11 @@ class ChallengeService {
           break;
       }
 
-      // Calculer les diamants (1 diamant par unité validée)
-      const diamonds = Math.min(Math.floor(current), challenge.goal.value);
+      // ✅ CORRECTION : Diamants proportionnels (max 4 par joueur)
+      const diamonds = Math.min(
+        Math.floor((current / challenge.goal.value) * 4),
+        4
+      );
       const completed = current >= challenge.goal.value;
 
       // Mise à jour du joueur
@@ -205,7 +206,8 @@ class ChallengeService {
       console.log(`✅ Progression joueur ${i + 1}:`, {
         progress: current,
         diamonds,
-        completed
+        completed,
+        pourcentage: Math.round((current / challenge.goal.value) * 100)
       });
     }
 
@@ -242,7 +244,7 @@ class ChallengeService {
   async getPendingInvitations(userId) {
     const invitations = await WeeklyChallenge.find({
       'players.user': userId,
-      creator: { $ne: userId },  // Pas le créateur
+      creator: { $ne: userId },
       status: 'pending',
       invitationStatus: 'pending',
       endDate: { $gt: new Date() }
@@ -254,10 +256,10 @@ class ChallengeService {
     return invitations;
   }
 
-  // ⭐ Mettre à jour un challenge (changement d'objectif)
+  // ⭐ Mettre à jour un challenge
   async updateChallenge(userId, data) {
     const challenge = await WeeklyChallenge.findOne({
-      creator: userId,  // Seul le créateur peut modifier
+      creator: userId,
       status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
     });
@@ -275,7 +277,6 @@ class ChallengeService {
     challenge.title = data.title;
     challenge.icon = data.icon;
 
-    // Réinitialiser la progression
     challenge.players.forEach(player => {
       player.progress = 0;
       player.diamonds = 0;
@@ -289,7 +290,7 @@ class ChallengeService {
   // ⭐ Supprimer un challenge
   async deleteChallenge(userId) {
     const result = await WeeklyChallenge.findOneAndDelete({
-      creator: userId,  // Seul le créateur peut supprimer
+      creator: userId,
       status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
     });
