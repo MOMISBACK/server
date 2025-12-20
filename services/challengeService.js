@@ -14,17 +14,14 @@ class ChallengeService {
       throw new Error('Un objectif valide est requis');
     }
 
-    // Dates de la semaine (lundi-lundi)
+    // Dates de la semaine (maintenant à 7 jours plus tard)
     const now = new Date();
-    const dayOfWeek = now.getDay();
-    const daysUntilMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek);
-    
-    const nextMonday = new Date(now);
-    nextMonday.setDate(now.getDate() + daysUntilMonday);
-    nextMonday.setHours(0, 0, 0, 0);
-    
-    const followingMonday = new Date(nextMonday);
-    followingMonday.setDate(nextMonday.getDate() + 7);
+    const startDate = new Date(now);
+    startDate.setHours(0, 0, 0, 0); // Début du jour actuel
+
+    const endDate = new Date(now);
+    endDate.setDate(now.getDate() + 7);
+    endDate.setHours(23, 59, 59, 999); // Fin du jour 7 jours plus tard
 
     const challenge = new WeeklyChallenge({
       user: userId,
@@ -32,8 +29,8 @@ class ChallengeService {
       activityTypes,
       title,
       icon,
-      startDate: nextMonday,
-      endDate: followingMonday,
+      startDate,
+      endDate,
       progress: {
         current: 0,
         goal: goal.value,

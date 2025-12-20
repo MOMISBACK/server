@@ -8,7 +8,7 @@ const { body, validationResult } = require('express-validator');
 const ALLOWED_FIELDS = {
   running: ['distance', 'elevationGain', 'avgSpeed'],
   cycling: ['distance', 'elevationGain', 'avgSpeed'],
-  walking: ['distance', 'elevationGain', 'avgSpeed'],
+  walking: ['distance'],
   swimming: ['distance', 'poolLength', 'laps'],
   workout: ['exercises'],
   yoga: [], // Pas de champs spécifiques
