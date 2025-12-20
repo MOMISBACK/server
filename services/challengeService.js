@@ -14,14 +14,34 @@ class ChallengeService {
       throw new Error('Un objectif valide est requis');
     }
 
-    // Dates de la semaine (maintenant à 7 jours plus tard)
+    // ✅ CORRIGÉ : Challenge commence le LUNDI DE CETTE SEMAINE (pas le prochain)
     const now = new Date();
-    const startDate = new Date(now);
-    startDate.setHours(0, 0, 0, 0); // Début du jour actuel
+    const dayOfWeek = now.getDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+    
+    // Calculer le lundi de cette semaine
+    let daysFromMonday;
+    if (dayOfWeek === 0) {
+      // Si dimanche, le lundi était il y a 6 jours
+      daysFromMonday = 6;
+    } else {
+      // Sinon, c'est dayOfWeek - 1 (ex: mardi = 2, donc 2-1 = 1 jour depuis lundi)
+      daysFromMonday = dayOfWeek - 1;
+    }
+    
+    const thisMonday = new Date(now);
+    thisMonday.setDate(now.getDate() - daysFromMonday);
+    thisMonday.setHours(0, 0, 0, 0);
+    
+    // Le lundi suivant (fin du challenge)
+    const nextMonday = new Date(thisMonday);
+    nextMonday.setDate(thisMonday.getDate() + 7);
+    nextMonday.setHours(0, 0, 0, 0);
 
-    const endDate = new Date(now);
-    endDate.setDate(now.getDate() + 7);
-    endDate.setHours(23, 59, 59, 999); // Fin du jour 7 jours plus tard
+    console.log('📅 Dates du challenge:', {
+      aujourdhui: now.toISOString(),
+      debut: thisMonday.toISOString(),
+      fin: nextMonday.toISOString()
+    });
 
     const challenge = new WeeklyChallenge({
       user: userId,
@@ -29,8 +49,8 @@ class ChallengeService {
       activityTypes,
       title,
       icon,
-      startDate,
-      endDate,
+      startDate: thisMonday,      // ✅ LUNDI DE CETTE SEMAINE
+      endDate: nextMonday,         // ✅ LUNDI PROCHAIN
       progress: {
         current: 0,
         goal: goal.value,
@@ -62,18 +82,29 @@ class ChallengeService {
       type: { $in: challenge.activityTypes }
     });
 
+    console.log('📊 Calcul progression:', {
+      challengeId: challenge._id,
+      periodeDebut: challenge.startDate,
+      periodeFin: challenge.endDate,
+      activitesTrouvees: activities.length,
+      typesRecherches: challenge.activityTypes
+    });
+
     // ⭐ Calculer la progression selon le type d'objectif
     let current = 0;
 
     switch (challenge.goal.type) {
       case 'distance':
         current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
+        console.log('📏 Distance totale:', current, 'km');
         break;
       case 'duration':
         current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
+        console.log('⏱️ Durée totale:', current, 'min');
         break;
       case 'count':
         current = activities.length;
+        console.log('🔢 Nombre d\'activités:', current);
         break;
     }
 
@@ -86,6 +117,7 @@ class ChallengeService {
     };
 
     await challenge.save();
+    console.log('✅ Progression mise à jour:', challenge.progress);
     return challenge;
   }
 
