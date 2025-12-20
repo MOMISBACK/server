@@ -2,131 +2,234 @@
 
 const WeeklyChallenge = require('../models/WeeklyChallenge');
 const Activity = require('../models/Activity');
+const User = require('../models/User');
 
 class ChallengeService {
   
-  // ⭐ Créer un challenge
-  async createChallenge(userId, data) {
+  // ⭐ Créer un challenge SOLO
+  async createSoloChallenge(userId, data) {
     const { goal, activityTypes, title, icon } = data;
 
-    // Validation : un seul objectif
     if (!goal || !goal.type || !goal.value) {
       throw new Error('Un objectif valide est requis');
     }
 
-    // ✅ CORRIGÉ : Challenge commence le LUNDI DE CETTE SEMAINE (pas le prochain)
-    const now = new Date();
-    const dayOfWeek = now.getDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
-    
-    // Calculer le lundi de cette semaine
-    let daysFromMonday;
-    if (dayOfWeek === 0) {
-      // Si dimanche, le lundi était il y a 6 jours
-      daysFromMonday = 6;
-    } else {
-      // Sinon, c'est dayOfWeek - 1 (ex: mardi = 2, donc 2-1 = 1 jour depuis lundi)
-      daysFromMonday = dayOfWeek - 1;
-    }
-    
-    const thisMonday = new Date(now);
-    thisMonday.setDate(now.getDate() - daysFromMonday);
-    thisMonday.setHours(0, 0, 0, 0);
-    
-    // Le lundi suivant (fin du challenge)
-    const nextMonday = new Date(thisMonday);
-    nextMonday.setDate(thisMonday.getDate() + 7);
-    nextMonday.setHours(0, 0, 0, 0);
-
-    console.log('📅 Dates du challenge:', {
-      aujourdhui: now.toISOString(),
-      debut: thisMonday.toISOString(),
-      fin: nextMonday.toISOString()
-    });
+    const { startDate, endDate } = this._calculateWeekDates();
 
     const challenge = new WeeklyChallenge({
-      user: userId,
+      mode: 'solo',
+      creator: userId,
+      players: [{
+        user: userId,
+        progress: 0,
+        diamonds: 0,
+        completed: false
+      }],
       goal,
       activityTypes,
       title,
       icon,
-      startDate: thisMonday,      // ✅ LUNDI DE CETTE SEMAINE
-      endDate: nextMonday,         // ✅ LUNDI PROCHAIN
-      progress: {
-        current: 0,
-        goal: goal.value,
-        percentage: 0,
-        isCompleted: false
-      }
+      startDate,
+      endDate,
+      status: 'active',
+      user: userId  // Rétrocompatibilité
     });
 
     await challenge.save();
+    console.log('✅ Challenge SOLO créé:', challenge._id);
     return challenge;
   }
 
-  // ⭐ Calculer la progression
-  async calculateProgress(userId) {
-    const challenge = await WeeklyChallenge.findOne({
-      user: userId,
-      endDate: { $gt: new Date() }
+  // ⭐ Créer un challenge DUO (avec invitation)
+  async createDuoChallenge(creatorId, partnerId, data) {
+    const { goal, activityTypes, title, icon } = data;
+
+    if (!goal || !goal.type || !goal.value) {
+      throw new Error('Un objectif valide est requis');
+    }
+
+    // Vérifier que le partenaire existe
+    const partner = await User.findById(partnerId);
+    if (!partner) {
+      throw new Error('Partenaire introuvable');
+    }
+
+    if (creatorId === partnerId) {
+      throw new Error('Vous ne pouvez pas vous inviter vous-même');
+    }
+
+    const { startDate, endDate } = this._calculateWeekDates();
+
+    const challenge = new WeeklyChallenge({
+      mode: 'duo',
+      creator: creatorId,
+      players: [
+        { user: creatorId, progress: 0, diamonds: 0, completed: false },
+        { user: partnerId, progress: 0, diamonds: 0, completed: false }
+      ],
+      goal,
+      activityTypes,
+      title,
+      icon,
+      startDate,
+      endDate,
+      status: 'pending',  // En attente d'acceptation
+      invitationStatus: 'pending'
     });
+
+    await challenge.save();
+    console.log('✅ Challenge DUO créé (invitation envoyée):', challenge._id);
+    return challenge;
+  }
+
+  // ⭐ Accepter une invitation DUO
+  async acceptInvitation(userId, challengeId) {
+    const challenge = await WeeklyChallenge.findById(challengeId);
+    
+    if (!challenge) {
+      throw new Error('Challenge introuvable');
+    }
+
+    if (challenge.mode !== 'duo') {
+      throw new Error('Ce challenge n\'est pas en mode duo');
+    }
+
+    // Vérifier que l'utilisateur est bien un joueur
+    const isPlayer = challenge.players.some(p => p.user.toString() === userId);
+    if (!isPlayer) {
+      throw new Error('Vous n\'êtes pas invité à ce challenge');
+    }
+
+    // Vérifier que ce n'est pas le créateur qui accepte
+    if (challenge.creator.toString() === userId) {
+      throw new Error('Vous ne pouvez pas accepter votre propre invitation');
+    }
+
+    challenge.status = 'active';
+    challenge.invitationStatus = 'accepted';
+    await challenge.save();
+
+    console.log('✅ Invitation acceptée:', challengeId);
+    return challenge;
+  }
+
+  // ⭐ Refuser une invitation DUO
+  async refuseInvitation(userId, challengeId) {
+    const challenge = await WeeklyChallenge.findById(challengeId);
+    
+    if (!challenge) {
+      throw new Error('Challenge introuvable');
+    }
+
+    if (challenge.mode !== 'duo') {
+      throw new Error('Ce challenge n\'est pas en mode duo');
+    }
+
+    const isPlayer = challenge.players.some(p => p.user.toString() === userId);
+    if (!isPlayer) {
+      throw new Error('Vous n\'êtes pas invité à ce challenge');
+    }
+
+    if (challenge.creator.toString() === userId) {
+      throw new Error('Vous ne pouvez pas refuser votre propre challenge');
+    }
+
+    challenge.status = 'cancelled';
+    challenge.invitationStatus = 'refused';
+    await challenge.save();
+
+    console.log('❌ Invitation refusée:', challengeId);
+    return challenge;
+  }
+
+  // ⭐ Calculer la progression d'un challenge
+  async calculateProgress(userId) {
+    // Trouver le challenge actif de l'utilisateur (SOLO ou DUO accepté)
+    const challenge = await WeeklyChallenge.findOne({
+      'players.user': userId,
+      status: { $in: ['active', 'pending'] },
+      endDate: { $gt: new Date() }
+    }).sort({ createdAt: -1 });
 
     if (!challenge) return null;
 
-    // Activités de la semaine qui correspondent
-    const activities = await Activity.find({
-      user: userId,
-      date: {
-        $gte: challenge.startDate,
-        $lt: challenge.endDate
-      },
-      type: { $in: challenge.activityTypes }
+    console.log('📊 Calcul progression challenge:', {
+      id: challenge._id,
+      mode: challenge.mode,
+      status: challenge.status
     });
 
-    console.log('📊 Calcul progression:', {
-      challengeId: challenge._id,
-      periodeDebut: challenge.startDate,
-      periodeFin: challenge.endDate,
-      activitesTrouvees: activities.length,
-      typesRecherches: challenge.activityTypes
-    });
+    // Calculer pour chaque joueur
+    for (let i = 0; i < challenge.players.length; i++) {
+      const player = challenge.players[i];
+      
+      // Activités du joueur dans la période
+      const activities = await Activity.find({
+        user: player.user,
+        date: {
+          $gte: challenge.startDate,
+          $lt: challenge.endDate
+        },
+        type: { $in: challenge.activityTypes }
+      });
 
-    // ⭐ Calculer la progression selon le type d'objectif
-    let current = 0;
+      console.log(`📊 Joueur ${i + 1}:`, {
+        userId: player.user,
+        activitiesTrouvees: activities.length
+      });
 
-    switch (challenge.goal.type) {
-      case 'distance':
-        current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
-        console.log('📏 Distance totale:', current, 'km');
-        break;
-      case 'duration':
-        current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
-        console.log('⏱️ Durée totale:', current, 'min');
-        break;
-      case 'count':
-        current = activities.length;
-        console.log('🔢 Nombre d\'activités:', current);
-        break;
+      // Calculer la progression selon le type d'objectif
+      let current = 0;
+
+      switch (challenge.goal.type) {
+        case 'distance':
+          current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
+          break;
+        case 'duration':
+          current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
+          break;
+        case 'count':
+          current = activities.length;
+          break;
+      }
+
+      // Calculer les diamants (1 diamant par unité validée)
+      const diamonds = Math.min(Math.floor(current), challenge.goal.value);
+      const completed = current >= challenge.goal.value;
+
+      // Mise à jour du joueur
+      challenge.players[i].progress = current;
+      challenge.players[i].diamonds = diamonds;
+      challenge.players[i].completed = completed;
+
+      console.log(`✅ Progression joueur ${i + 1}:`, {
+        progress: current,
+        diamonds,
+        completed
+      });
     }
 
-    // Mise à jour de la progression
-    challenge.progress = {
-      current,
-      goal: challenge.goal.value,
-      percentage: Math.min((current / challenge.goal.value) * 100, 100),
-      isCompleted: current >= challenge.goal.value
-    };
+    // ✅ Vérifier et attribuer le bonus (DUO uniquement)
+    if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
+      if (challenge.checkBonus()) {
+        await challenge.awardBonus();
+        console.log('🎉 BONUS DÉBLOQUÉ ! Diamants doublés');
+      }
+    }
 
     await challenge.save();
-    console.log('✅ Progression mise à jour:', challenge.progress);
     return challenge;
   }
 
-  // Récupérer le challenge actif
+  // ⭐ Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
     const challenge = await WeeklyChallenge.findOne({
-      user: userId,
+      'players.user': userId,
+      status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    })
+    .populate('players.user', 'email totalDiamonds')
+    .sort({ createdAt: -1 });
 
     if (challenge) {
       return await this.calculateProgress(userId);
@@ -135,18 +238,34 @@ class ChallengeService {
     return null;
   }
 
-  // Mettre à jour
+  // ⭐ Récupérer les invitations en attente d'un utilisateur
+  async getPendingInvitations(userId) {
+    const invitations = await WeeklyChallenge.find({
+      'players.user': userId,
+      creator: { $ne: userId },  // Pas le créateur
+      status: 'pending',
+      invitationStatus: 'pending',
+      endDate: { $gt: new Date() }
+    })
+    .populate('creator', 'email')
+    .populate('players.user', 'email')
+    .sort({ createdAt: -1 });
+
+    return invitations;
+  }
+
+  // ⭐ Mettre à jour un challenge (changement d'objectif)
   async updateChallenge(userId, data) {
     const challenge = await WeeklyChallenge.findOne({
-      user: userId,
+      creator: userId,  // Seul le créateur peut modifier
+      status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
     });
 
     if (!challenge) {
-      throw new Error('Aucun challenge actif');
+      throw new Error('Aucun challenge actif ou vous n\'êtes pas le créateur');
     }
 
-    // Validation : un seul objectif
     if (!data.goal || !data.goal.type || !data.goal.value) {
       throw new Error('Un objectif valide est requis');
     }
@@ -157,29 +276,52 @@ class ChallengeService {
     challenge.icon = data.icon;
 
     // Réinitialiser la progression
-    challenge.progress = {
-      current: 0,
-      goal: data.goal.value,
-      percentage: 0,
-      isCompleted: false
-    };
+    challenge.players.forEach(player => {
+      player.progress = 0;
+      player.diamonds = 0;
+      player.completed = false;
+    });
 
     await challenge.save();
     return await this.calculateProgress(userId);
   }
 
-  // Supprimer
+  // ⭐ Supprimer un challenge
   async deleteChallenge(userId) {
     const result = await WeeklyChallenge.findOneAndDelete({
-      user: userId,
+      creator: userId,  // Seul le créateur peut supprimer
+      status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
     });
 
     if (!result) {
-      throw new Error('Aucun challenge actif');
+      throw new Error('Aucun challenge actif ou vous n\'êtes pas le créateur');
     }
 
     return { success: true };
+  }
+
+  // ⭐ Helper : calculer les dates de la semaine
+  _calculateWeekDates() {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    
+    let daysFromMonday;
+    if (dayOfWeek === 0) {
+      daysFromMonday = 6;
+    } else {
+      daysFromMonday = dayOfWeek - 1;
+    }
+    
+    const thisMonday = new Date(now);
+    thisMonday.setDate(now.getDate() - daysFromMonday);
+    thisMonday.setHours(0, 0, 0, 0);
+    
+    const nextMonday = new Date(thisMonday);
+    nextMonday.setDate(thisMonday.getDate() + 7);
+    nextMonday.setHours(23, 59, 59, 999);
+
+    return { startDate: thisMonday, endDate: nextMonday };
   }
 }
 

@@ -49,36 +49,27 @@ afterAll(async () => {
 }, 10000);
 
 describe('🎯 Challenges API - Multi-objectifs', () => {
-  
   test('POST /api/challenges - Créer avec 1 objectif', async () => {
     await WeeklyChallenge.deleteMany({ user: userId });
     const res = await request(app)
       .post('/api/challenges')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
-        goals: [
-          { type: 'distance', value: 10 }
-        ],
+        goal: { type: 'distance', value: 10 },
         activityTypes: ['running'],
         title: '10 km de course',
         icon: 'trophy-outline'
       });
-  
-    console.log('📥 Response status:', res.status);
-    console.log('📥 Response body:', res.body);  // ⭐ Voir l'erreur
-  
+
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.goals).toHaveLength(1);
-    expect(res.body.data.goals[0].type).toBe('distance');
-    expect(res.body.data.goals[0].value).toBe(10);
-    expect(res.body.data.overallProgress.totalGoals).toBe(1);
+    expect(res.body.data.goal).toBeDefined();
+    expect(res.body.data.goal.type).toBe('distance');
+    expect(res.body.data.goal.value).toBe(10);
+    expect(res.body.data.progress.goal).toBe(10);
   });
-  
 
-  test('POST /api/challenges - Créer avec multi-objectifs', async () => {
-    
-
+  test('POST /api/challenges - Rejeter multi-objectifs (non supporté)', async () => {
     const res = await request(app)
       .post('/api/challenges')
       .set('Authorization', `Bearer ${authToken}`)
@@ -86,18 +77,14 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
         goals: [
           { type: 'distance', value: 15 },
           { type: 'duration', value: 300 },
-          { type: 'count', value: 3 }
         ],
         activityTypes: ['running', 'cycling'],
-        title: '15 km + 5h + 3 activités',
+        title: '15 km + 5h',
         icon: 'flag-outline'
       });
 
-    expect(res.status).toBe(201);
-    expect(res.body.data.goals).toHaveLength(3);
-    expect(res.body.data.progress).toHaveLength(3);
-    expect(res.body.data.overallProgress.totalGoals).toBe(3);
-    expect(res.body.data.overallProgress.percentage).toBe(0);
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 
   test('GET /api/challenges/current - Récupérer le challenge actif', async () => {
@@ -107,11 +94,25 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.goals).toBeDefined();
-    expect(Array.isArray(res.body.data.goals)).toBe(true);
+    expect(res.body.data.goal).toBeDefined();
+    expect(typeof res.body.data.goal).toBe('object');
   });
 
-  test('POST /refresh-progress - Calculer progression multi-objectifs', async () => {
+  test('POST /refresh-progress - Calculer progression distance pour un challenge distance', async () => {
+    // Créer un challenge distance couvrant running + cycling
+    await WeeklyChallenge.deleteMany({ user: userId });
+    const createRes = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        goal: { type: 'distance', value: 100 },
+        activityTypes: ['running', 'cycling'],
+        title: 'Distance multi',
+        icon: 'flag-outline'
+      });
+
+    expect(createRes.status).toBe(201);
+
     // Créer 2 activités
     await request(app)
       .post('/api/activities')
@@ -143,25 +144,11 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
       .set('Authorization', `Bearer ${authToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.progress).toHaveLength(3);
-    
-    // Vérifier distance (8 + 20 = 28 km)
-    const distanceProgress = res.body.data.progress.find(p => p.goalType === 'distance');
-    expect(distanceProgress).toBeDefined();
-    expect(distanceProgress.current).toBe(28);
-    
-    // Vérifier durée (60 + 120 = 180 min)
-    const durationProgress = res.body.data.progress.find(p => p.goalType === 'duration');
-    expect(durationProgress).toBeDefined();
-    expect(durationProgress.current).toBe(180);
-    
-    // Vérifier count (2 activités)
-    const countProgress = res.body.data.progress.find(p => p.goalType === 'count');
-    expect(countProgress).toBeDefined();
-    expect(countProgress.current).toBe(2);
+    expect(res.body.success).toBe(true);
 
-    // Progression globale (distance + durée complétés)
-    expect(res.body.data.overallProgress.completedGoals).toBe(2);
+    // Vérifier distance (8 + 20 = 28 km)
+    expect(res.body.data.progress.current).toBe(28);
+    expect(res.body.data.progress.goal).toBe(100);
   });
 
   test('PUT /api/challenges/current - Modifier le challenge', async () => {
@@ -169,19 +156,15 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
       .put('/api/challenges/current')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
-        goals: [
-          { type: 'distance', value: 50 },
-          { type: 'count', value: 5 }
-        ],
+        goal: { type: 'distance', value: 50 },
         activityTypes: ['running', 'walking'],
-        title: '50 km + 5 activités',
+        title: '50 km',
         icon: 'rocket-outline'
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.goals).toHaveLength(2);
-    expect(res.body.data.goals[0].value).toBe(50);
-    expect(res.body.data.overallProgress.totalGoals).toBe(2);
+    expect(res.body.data.goal.value).toBe(50);
+    expect(res.body.data.progress.goal).toBe(50);
   });
 
   test('DELETE /api/challenges/current - Supprimer le challenge', async () => {
