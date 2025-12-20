@@ -12,7 +12,7 @@ const playerSchema = new mongoose.Schema({
   progress: {
     type: Number,
     default: 0,
-    min: 0  // ✅ AJOUTÉ : Pas de progression négative
+    min: 0
   },
   diamonds: {
     type: Number,
@@ -25,9 +25,8 @@ const playerSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
-// ✅ Schéma principal du challenge (compatible SOLO + DUO)
+// ✅ Schéma principal du challenge
 const weeklyChallengeSchema = new mongoose.Schema({
-  // Mode du challenge
   mode: {
     type: String,
     enum: ['solo', 'duo'],
@@ -35,15 +34,13 @@ const weeklyChallengeSchema = new mongoose.Schema({
     default: 'solo'
   },
   
-  // Créateur du challenge
   creator: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-    index: true  // ✅ AJOUTÉ : Index explicite pour requêtes
+    index: true
   },
   
-  // Joueurs (1 pour solo, 2 pour duo)
   players: {
     type: [playerSchema],
     required: true,
@@ -57,7 +54,6 @@ const weeklyChallengeSchema = new mongoose.Schema({
     }
   },
   
-  // Objectif unique
   goal: {
     type: {
       type: String,
@@ -71,25 +67,23 @@ const weeklyChallengeSchema = new mongoose.Schema({
     }
   },
   
-  // Types d'activités concernées
   activityTypes: {
     type: [String],
     required: true,
     enum: ['running', 'cycling', 'walking', 'swimming', 'yoga', 'workout'],
     validate: {
       validator: function(v) {
-        return v.length > 0;  // ✅ AJOUTÉ : Au moins un type d'activité
+        return v.length > 0;
       },
       message: 'Au moins un type d\'activité requis'
     }
   },
   
-  // Métadonnées
   title: {
     type: String,
     required: true,
-    trim: true,  // ✅ AJOUTÉ : Supprime espaces inutiles
-    maxlength: 100  // ✅ AJOUTÉ : Limite raisonnable
+    trim: true,
+    maxlength: 100
   },
   
   icon: {
@@ -97,7 +91,6 @@ const weeklyChallengeSchema = new mongoose.Schema({
     default: 'trophy-outline'
   },
   
-  // Période
   startDate: {
     type: Date,
     required: true
@@ -108,21 +101,19 @@ const weeklyChallengeSchema = new mongoose.Schema({
     required: true,
     validate: {
       validator: function(v) {
-        return v > this.startDate;  // ✅ AJOUTÉ : endDate > startDate
+        return v > this.startDate;
       },
       message: 'La date de fin doit être après la date de début'
     }
   },
   
-  // État du challenge
   status: {
     type: String,
     enum: ['pending', 'active', 'completed', 'failed', 'cancelled'],
     default: 'active',
-    index: true  // ✅ AJOUTÉ : Index pour requêtes status
+    index: true
   },
   
-  // ✅ Bonus (pour DUO uniquement)
   bonusEarned: {
     type: Boolean,
     default: false
@@ -133,54 +124,41 @@ const weeklyChallengeSchema = new mongoose.Schema({
     default: false
   },
   
-  // ✅ Pour mode DUO : système d'invitation
   invitationStatus: {
     type: String,
     enum: ['none', 'pending', 'accepted', 'refused'],
     default: 'none'
   },
   
-  // ✅ COMPATIBILITÉ : Garder "user" pour les anciens challenges SOLO
- user: {
+  user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-    // PAS de sparse ici
   }
 }, {
   timestamps: true
 });
 
-// ✅ CORRECT: sparse sur l'INDEX
+// ✅ Indexes
 weeklyChallengeSchema.index(
   { user: 1, startDate: 1 }, 
-  { 
-    sparse: true,  // ← ICI est le bon endroit !
-    name: 'user_startDate_sparse'
-  }
+  { sparse: true, name: 'user_startDate_sparse' }
 );
-
-// ✅ AMÉLIORÉ : Index composites pour performances
 weeklyChallengeSchema.index({ creator: 1, createdAt: -1 });
 weeklyChallengeSchema.index({ 'players.user': 1, status: 1 });
 weeklyChallengeSchema.index({ status: 1, endDate: -1 });
-weeklyChallengeSchema.index({ user: 1, startDate: 1 }, { sparse: true });
-
-// ✅ NEW: Index pour requêtes d'invitations
 weeklyChallengeSchema.index({ 
   mode: 1, 
   status: 1, 
   invitationStatus: 1, 
   endDate: 1 
 });
-
-// ✅ NEW: Index pour cleanup CRON (challenges expirés)
 weeklyChallengeSchema.index({ 
   status: 1, 
   endDate: 1, 
   updatedAt: 1 
 });
 
-// ✅ Méthode virtuelle : progression (rétrocompatibilité frontend SOLO)
+// ✅ Virtuals
 weeklyChallengeSchema.virtual('progress').get(function() {
   if (this.mode === 'solo' && this.players.length > 0) {
     const player = this.players[0];
@@ -192,7 +170,6 @@ weeklyChallengeSchema.virtual('progress').get(function() {
     };
   }
   
-  // Pour DUO : retourne la progression du créateur par défaut
   if (this.mode === 'duo') {
     const creatorPlayer = this.players.find(p => 
       p.user.toString() === this.creator.toString()
@@ -210,7 +187,7 @@ weeklyChallengeSchema.virtual('progress').get(function() {
   return null;
 });
 
-// ✅ NEW: Méthode pour obtenir progression d'un joueur spécifique
+// ✅ Methods
 weeklyChallengeSchema.methods.getPlayerProgress = function(userId) {
   const player = this.players.find(p => p.user.toString() === userId.toString());
   if (!player) return null;
@@ -224,7 +201,6 @@ weeklyChallengeSchema.methods.getPlayerProgress = function(userId) {
   };
 };
 
-// ✅ Méthode : vérifier si le bonus est débloqué (DUO)
 weeklyChallengeSchema.methods.checkBonus = function() {
   if (this.mode !== 'duo') return false;
   if (this.players.length !== 2) return false;
@@ -233,7 +209,6 @@ weeklyChallengeSchema.methods.checkBonus = function() {
   return allCompleted;
 };
 
-// ✅ AMÉLIORÉ : Méthode : attribuer le bonus (doubler les diamants)
 weeklyChallengeSchema.methods.awardBonus = async function() {
   if (this.bonusAwarded) {
     console.log('⚠️ Bonus déjà attribué pour ce challenge');
@@ -249,7 +224,6 @@ weeklyChallengeSchema.methods.awardBonus = async function() {
   
   console.log('🎁 Attribution du bonus DUO...');
   
-  // Doubler les diamants de chaque joueur
   for (const player of this.players) {
     const playerId = typeof player.user === 'string' 
       ? player.user 
@@ -257,7 +231,7 @@ weeklyChallengeSchema.methods.awardBonus = async function() {
     
     const result = await User.findByIdAndUpdate(
       playerId,
-      { $inc: { totalDiamonds: player.diamonds } }, // Ajoute les diamants une 2ème fois
+      { $inc: { totalDiamonds: player.diamonds } },
       { new: true }
     );
     
@@ -269,7 +243,6 @@ weeklyChallengeSchema.methods.awardBonus = async function() {
   this.bonusEarned = true;
   this.bonusAwarded = true;
   
-  // ✅ AJOUTÉ : Ne changer status que si pas déjà completed
   if (this.status !== 'completed') {
     this.status = 'completed';
   }
@@ -280,36 +253,33 @@ weeklyChallengeSchema.methods.awardBonus = async function() {
   return true;
 };
 
-// ✅ NEW: Méthode pour vérifier si challenge est expiré
 weeklyChallengeSchema.methods.isExpired = function() {
   return new Date() > this.endDate;
 };
 
-// ✅ NEW: Méthode pour vérifier si un user participe
 weeklyChallengeSchema.methods.hasPlayer = function(userId) {
   return this.players.some(p => p.user.toString() === userId.toString());
 };
 
-// ✅ Hook pre-save : auto-calculer bonusEarned
-weeklyChallengeSchema.pre('save', function(next) {
+// ✅ CORRIGÉ : Hook pre-save sans next()
+weeklyChallengeSchema.pre('save', function() {
   if (this.mode === 'duo' && !this.bonusAwarded) {
     this.bonusEarned = this.checkBonus();
   }
   
-  // ✅ NEW: Valider cohérence status/invitationStatus
   if (this.mode === 'duo' && this.status === 'pending' && this.invitationStatus === 'none') {
     this.invitationStatus = 'pending';
   }
   
-  next();
+  // Pas de next() !
 });
 
-// ✅ NEW: Hook post-save logging
+// ✅ Hook post-save
 weeklyChallengeSchema.post('save', function(doc) {
   console.log(`💾 Challenge ${doc._id} sauvegardé - Status: ${doc.status}, Mode: ${doc.mode}`);
 });
 
-// Configurer toJSON pour inclure les virtuals
+// Configurer toJSON
 weeklyChallengeSchema.set('toJSON', { virtuals: true });
 weeklyChallengeSchema.set('toObject', { virtuals: true });
 
