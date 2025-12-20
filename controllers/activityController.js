@@ -66,6 +66,7 @@ const getCurrentDuoChallengeActivities = asyncHandler(async (req, res) => {
   const activities = await Activity.find({
     user: { $in: playerIds },
     date: { $gte: startDateNormalized, $lte: endDateNormalized },
+    createdAt: { $gte: startDateNormalized > challenge.createdAt ? startDateNormalized : challenge.createdAt },
     type: { $in: challenge.activityTypes },
   })
     .populate('user', 'email')

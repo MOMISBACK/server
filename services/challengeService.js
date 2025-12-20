@@ -306,6 +306,9 @@ class ChallengeService {
       
       const endDateNormalized = new Date(challenge.endDate);
       endDateNormalized.setHours(23, 59, 59, 999);
+
+      const createdAtDate = challenge.createdAt ? new Date(challenge.createdAt) : startDateNormalized;
+      const lowerBound = startDateNormalized > createdAtDate ? startDateNormalized : createdAtDate;
       
       // Construire la requête d'activités
       const activityQuery = {
@@ -314,14 +317,9 @@ class ChallengeService {
           $gte: startDateNormalized,
           $lte: endDateNormalized
         },
+        createdAt: { $gte: lowerBound },
         type: { $in: challenge.activityTypes }
       };
-
-      // ⚠️ Si le challenge est encore pending (invitation), ne compter
-      // que les activités créées APRÈS la création de l'invitation
-      if (challenge.status === 'pending' && challenge.createdAt) {
-        activityQuery.createdAt = { $gte: challenge.createdAt };
-      }
 
       const activities = await Activity.find(activityQuery);
 
