@@ -2,6 +2,14 @@ const { validationResult } = require('express-validator');
 const userService = require('../services/userService');
 const generateToken = require('../utils/generateToken');
 
+const formatValidationErrors = (errors) => {
+  if (!Array.isArray(errors)) return undefined;
+  return errors.map((e) => ({
+    field: e.param,
+    message: e.msg,
+  }));
+};
+
 /**
  * Handles user registration.
  * @param {object} req - Express request object.
@@ -10,7 +18,10 @@ const generateToken = require('../utils/generateToken');
 const registerUser = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    return res.status(400).json({
+      message: 'Invalid input',
+      errors: formatValidationErrors(errors.array()),
+    });
   }
 
   const { email, password } = req.body;
@@ -33,7 +44,28 @@ const registerUser = async (req, res) => {
       res.status(400).json({ message: 'Invalid user data' });
     }
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    // Ne pas exposer des détails sensibles au client, mais logger côté serveur.
+    console.error('registerUser error:', error);
+
+    // Duplication d'email (index unique)
+    if (error?.code === 11000) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    // Validation Mongoose (regex email, minlength, etc.)
+    if (error?.name === 'ValidationError') {
+      const fieldErrors = Object.values(error.errors || {}).map((e) => ({
+        field: e.path,
+        message: e.message,
+      }));
+      return res.status(400).json({
+        message: 'Invalid user data',
+        errors: fieldErrors,
+      });
+    }
+
+    // Problèmes DB / infra
+    return res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -45,7 +77,10 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    return res.status(400).json({
+      message: 'Invalid input',
+      errors: formatValidationErrors(errors.array()),
+    });
   }
 
   const { email, password } = req.body;

@@ -13,7 +13,9 @@ beforeAll(async () => {
 
     mongoServer = await MongoMemoryServer.create({
       binary: {
-        version: '6.0.9',
+        // 6.0.9 peut échouer à spawn sur certaines machines (ex: macOS arm64).
+        // On laisse une version configurable + fallback récent.
+        version: process.env.MONGOMS_VERSION || '7.0.14',
         downloadDir: './mongodb-binaries',
       },
       instance: {
