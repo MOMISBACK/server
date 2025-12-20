@@ -48,6 +48,24 @@ router.get('/invitations', protect, async (req, res) => {
   }
 });
 
+// GET /api/challenges/pending-sent
+// Invitation DUO envoyée par l'utilisateur (en attente)
+router.get('/pending-sent', protect, async (req, res) => {
+  try {
+    const pendingSent = await challengeService.getPendingSentChallenge(req.user.id);
+    res.json({
+      success: true,
+      data: pendingSent,
+    });
+  } catch (error) {
+    console.error('Erreur GET /pending-sent:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // POST /api/challenges
 router.post('/', protect, async (req, res) => {
   try {

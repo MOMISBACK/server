@@ -431,6 +431,22 @@ class ChallengeService {
     return invitations;
   }
 
+  // ⭐ Récupérer l'invitation envoyée (pending) par le créateur
+  async getPendingSentChallenge(userId) {
+    const challenge = await WeeklyChallenge.findOne({
+      creator: userId,
+      mode: 'duo',
+      status: 'pending',
+      invitationStatus: 'pending',
+      endDate: { $gt: new Date() },
+    })
+      .populate('creator', 'email')
+      .populate('players.user', 'email totalDiamonds')
+      .sort({ createdAt: -1 });
+
+    return challenge || null;
+  }
+
   // ⭐ Mettre à jour un challenge
   async updateChallenge(userId, data) {
     const challenge = await WeeklyChallenge.findOne({
