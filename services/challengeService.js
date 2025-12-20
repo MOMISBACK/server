@@ -141,7 +141,6 @@ class ChallengeService {
 
   // ⭐ Calculer la progression d'un challenge
   async calculateProgress(userId) {
-    // ✅ CORRIGÉ : Inclure 'completed'
     const challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
       status: { $in: ['active', 'pending', 'completed'] },
@@ -158,7 +157,6 @@ class ChallengeService {
       status: challenge.status
     });
 
-    // Calculer pour chaque joueur
     for (let i = 0; i < challenge.players.length; i++) {
       const player = challenge.players[i];
       const playerId = typeof player.user === 'string' ? player.user : player.user._id;
@@ -177,7 +175,6 @@ class ChallengeService {
         activitiesTrouvees: activities.length
       });
 
-      // Calculer la progression selon le type d'objectif
       let current = 0;
 
       switch (challenge.goal.type) {
@@ -192,14 +189,12 @@ class ChallengeService {
           break;
       }
 
-      // ✅ Diamants proportionnels (max 4 par joueur)
       const diamonds = Math.min(
         Math.floor((current / challenge.goal.value) * 4),
         4
       );
       const completed = current >= challenge.goal.value;
 
-      // Mise à jour du joueur
       challenge.players[i].progress = current;
       challenge.players[i].diamonds = diamonds;
       challenge.players[i].completed = completed;
@@ -212,7 +207,6 @@ class ChallengeService {
       });
     }
 
-    // ✅ Vérifier et attribuer le bonus (DUO uniquement)
     if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
       if (challenge.checkBonus()) {
         await challenge.awardBonus();
@@ -226,7 +220,6 @@ class ChallengeService {
 
   // ⭐ Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
-    // ✅ CORRIGÉ : Inclure 'completed'
     const challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
       status: { $in: ['active', 'pending', 'completed'] },
@@ -289,19 +282,94 @@ class ChallengeService {
     return await this.calculateProgress(userId);
   }
 
-  // ⭐ Supprimer un challenge
+  // ⭐ Supprimer/Quitter un challenge
   async deleteChallenge(userId) {
-    const result = await WeeklyChallenge.findOneAndDelete({
-      creator: userId,
-      status: { $in: ['active', 'pending'] },
+    const challenge = await WeeklyChallenge.findOne({
+      'players.user': userId,
+      status: { $in: ['active', 'pending', 'completed'] },
       endDate: { $gt: new Date() }
     });
 
-    if (!result) {
-      throw new Error('Aucun challenge actif ou vous n\'êtes pas le créateur');
+    if (!challenge) {
+      throw new Error('Aucun challenge actif');
     }
 
+    // ✅ Finaliser avant de supprimer (attribuer les diamants)
+    if (challenge.status !== 'completed') {
+      console.log('💎 Finalisation avant suppression...');
+      await this.finalizeChallenge(challenge._id);
+    }
+
+    await WeeklyChallenge.findByIdAndDelete(challenge._id);
+
+    console.log('✅ Challenge quitté et supprimé');
     return { success: true };
+  }
+
+  // ✅ Attribuer les diamants normaux (sans bonus)
+  async _awardNormalDiamonds(userId, diamonds) {
+    if (diamonds <= 0) return;
+    
+    await User.findByIdAndUpdate(
+      userId,
+      { $inc: { totalDiamonds: diamonds } }
+    );
+    
+    console.log(`💎 +${diamonds} diamants attribués à ${userId}`);
+  }
+
+  // ✅ Clôturer un challenge et attribuer les diamants
+  async finalizeChallenge(challengeId) {
+    const challenge = await WeeklyChallenge.findById(challengeId);
+    
+    if (!challenge) {
+      throw new Error('Challenge introuvable');
+    }
+    
+    if (challenge.status === 'completed') {
+      console.log('⚠️ Challenge déjà finalisé');
+      return challenge;
+    }
+    
+    console.log('🏁 Clôture du challenge:', challengeId);
+    
+    // Attribuer les diamants normaux à chaque joueur
+    for (const player of challenge.players) {
+      const playerId = typeof player.user === 'string' ? player.user : player.user._id;
+      
+      if (player.diamonds > 0) {
+        await User.findByIdAndUpdate(
+          playerId,
+          { $inc: { totalDiamonds: player.diamonds } }
+        );
+        console.log(`💎 +${player.diamonds} diamants → ${playerId}`);
+      }
+    }
+    
+    // Si DUO et bonus débloqué
+    if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
+      if (challenge.checkBonus()) {
+        // Doubler les diamants (bonus)
+        for (const player of challenge.players) {
+          const playerId = typeof player.user === 'string' ? player.user : player.user._id;
+          
+          await User.findByIdAndUpdate(
+            playerId,
+            { $inc: { totalDiamonds: player.diamonds } }
+          );
+          console.log(`🎁 BONUS +${player.diamonds} diamants → ${playerId}`);
+        }
+        
+        challenge.bonusEarned = true;
+        challenge.bonusAwarded = true;
+      }
+    }
+    
+    challenge.status = 'completed';
+    await challenge.save();
+    
+    console.log(`✅ Challenge ${challenge._id} finalisé`);
+    return challenge;
   }
 
   // ⭐ Helper : calculer les dates de la semaine
