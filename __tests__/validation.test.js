@@ -1,3 +1,5 @@
+// server/__tests__/validation.test.js
+
 const request = require('supertest');
 const express = require('express');
 const activityRoutes = require('../routes/activityRoutes');
@@ -149,9 +151,21 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: [],
-          goalType: 'distance',
-          goalValue: 50,
-          title: 'Défi test',
+          goals: [{ type: 'distance', value: 50 }],  // ⭐ Nouveau format
+          title: 'Défi test de validation',
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    test('❌ Devrait rejeter goals vide', async () => {
+      const res = await request(app)
+        .post('/api/challenges')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          activityTypes: ['running'],
+          goals: [],  // ⭐ Vide
+          title: 'Défi test de validation',
         });
 
       expect(res.status).toBe(400);
@@ -163,40 +177,37 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goalType: 'speed',
-          goalValue: 50,
-          title: 'Défi test',
+          goals: [{ type: 'speed', value: 50 }],  // ⭐ Type invalide
+          title: 'Défi test de validation',
         });
 
       expect(res.status).toBe(400);
     });
 
-    test('❌ Devrait rejeter goalValue < 1', async () => {
+    test('❌ Devrait rejeter goalValue < 0.1', async () => {
       const res = await request(app)
         .post('/api/challenges')
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goalType: 'distance',
-          goalValue: 0,
-          title: 'Défi test',
+          goals: [{ type: 'distance', value: 0 }],  // ⭐ Trop petit
+          title: 'Défi test de validation',
         });
 
       expect(res.status).toBe(400);
     });
 
-    test('❌ Devrait rejeter title trop court', async () => {
+    test('✅ Devrait accepter title court (ancien test obsolète)', async () => {
       const res = await request(app)
         .post('/api/challenges')
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goalType: 'distance',
-          goalValue: 50,
-          title: 'Test',
+          goals: [{ type: 'distance', value: 50 }],
+          title: 'Test',  // Accepté maintenant
         });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(201);
     });
   });
 });

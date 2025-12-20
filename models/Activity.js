@@ -89,4 +89,40 @@ const activitySchema = new mongoose.Schema({
   timestamps: true,
 });
 
+const allowedFieldsByType = {
+  running: ['distance', 'elevationGain', 'avgSpeed'],
+  cycling: ['distance', 'elevationGain', 'avgSpeed'],
+  walking: ['distance'],
+  swimming: ['distance', 'poolLength', 'laps'],
+  workout: ['exercises'],
+  yoga: [],
+};
+
+// Middleware de pré-validation pour nettoyer les données (synchrone)
+activitySchema.pre('validate', function () {
+  const type = this.type;
+  const allowedSpecificFields = allowedFieldsByType[type];
+
+  // Si le type n'est pas reconnu, laisser Mongoose gérer l'erreur enum
+  if (!allowedSpecificFields) {
+    return;
+  }
+
+  const allAllowedFields = new Set([
+    // Champs communs autorisés
+    'user', 'title', 'type', 'startTime', 'endTime', 'duration', 'date', 'source',
+    // Champs ajoutés par Mongoose/MongoDB
+    '_id', 'id', 'createdAt', 'updatedAt', '__v',
+    // Champs spécifiques au type
+    ...allowedSpecificFields
+  ]);
+
+  // Supprimer les champs non pertinents
+  Object.keys(this.toObject()).forEach(key => {
+    if (!allAllowedFields.has(key)) {
+      this[key] = undefined; // Utiliser this[key] pour la modification directe
+    }
+  });
+});
+
 module.exports = mongoose.model('Activity', activitySchema);

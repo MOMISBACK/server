@@ -67,6 +67,7 @@ describe('Activity Controller - E2E Tests', () => {
         type: 'workout',
         duration: 60,
         date: new Date().toISOString(),
+        source: 'manual',
       };
 
       const response = await request(app)
@@ -74,8 +75,39 @@ describe('Activity Controller - E2E Tests', () => {
         .send(invalidActivity);
 
       expect(response.status).toBe(400);
-      expect(response.body.message).toContain('Validation failed');
-      expect(response.body.details).toHaveProperty('title');
+      expect(response.body.success).toBe(false);
+      expect(response.body.message).toContain('Path `title` is required');
+    });
+
+    it('should create an activity and strip out extraneous fields', async () => {
+      const activityWithExtraFields = {
+        title: 'My Hybrid Workout',
+        type: 'workout',
+        duration: 55,
+        date: new Date().toISOString(),
+        source: 'manual',
+        exercises: [{ name: 'Bench Press', sets: 4, reps: 8, weight: 80 }],
+        // Champs non pertinents pour un "workout"
+        distance: 5,
+        avgSpeed: 10,
+      };
+
+      const response = await request(app)
+        .post('/api/activities')
+        .send(activityWithExtraFields);
+
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('_id');
+      // Vérifier que les champs non pertinents ne sont pas dans la réponse
+      expect(response.body).not.toHaveProperty('distance');
+      expect(response.body).not.toHaveProperty('avgSpeed');
+
+      // Vérifier également dans la base de données
+      const savedActivity = await Activity.findById(response.body._id);
+      expect(savedActivity).not.toBeNull();
+      expect(savedActivity.distance).toBeUndefined();
+      expect(savedActivity.avgSpeed).toBeUndefined();
+      expect(savedActivity.exercises.length).toBe(1);
     });
   });
 
@@ -142,7 +174,7 @@ describe('Activity Controller - E2E Tests', () => {
         .delete(`/api/activities/${nonExistentId}`);
 
       expect(response.status).toBe(404);
-      expect(response.body.message).toBe('Activity not found');
+      expect(response.body.message).toBe('Activité introuvable');
     });
 
     it('should return 403 if the user tries to delete an activity of another user', async () => {
@@ -159,7 +191,7 @@ describe('Activity Controller - E2E Tests', () => {
         .delete(`/api/activities/${userTwoActivity._id}`);
 
       expect(response.status).toBe(403);
-      expect(response.body.message).toBe('User not authorized to delete this activity');
+      expect(response.body.message).toBe("Vous n'êtes pas autorisé à supprimer cette activité");
 
       const activityInDb = await Activity.findById(userTwoActivity._id);
       expect(activityInDb).not.toBeNull();

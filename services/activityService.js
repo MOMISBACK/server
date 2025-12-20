@@ -1,14 +1,4 @@
 const Activity = require('../models/Activity');
-const activityTypeConfig = require('../utils/activityTypeConfig');
-
-// Classe d'erreur personnalisée pour les erreurs de validation
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'ValidationError';
-    this.statusCode = 400;
-  }
-}
 
 /**
  * Gets activities based on a query object.
@@ -20,37 +10,11 @@ const getActivities = async (query) => {
 };
 
 /**
- * Creates a new activity after validating its fields based on type.
+ * Creates a new activity. The data is automatically validated by the Mongoose schema.
  * @param {object} activityData - The data for the new activity, including userId.
  * @returns {Promise<Activity>} The newly created activity.
  */
 const createActivity = async (activityData) => {
-  // --- Validation dynamique pour les entrées manuelles ---
-  if (activityData.source === 'manual') {
-    const { type } = activityData;
-    const config = activityTypeConfig[type];
-
-    if (!config) {
-      throw new ValidationError(`Le type d'activité '${type}' est invalide.`);
-    }
-
-    const allowedFields = new Set(config.allowed);
-
-    // On ne vérifie que les champs spécifiques à une activité
-    const specificFieldsInRequest = Object.keys(activityData).filter(key =>
-      !['user', 'userId', 'type', 'startTime', 'endTime', 'date', 'source','title', 'duration'].includes(key)
-    );
-
-    for (const field of specificFieldsInRequest) {
-      if (activityData[field] !== undefined && activityData[field] !== null) {
-        if (!allowedFields.has(field)) {
-          throw new ValidationError(`Le champ '${field}' n'est pas applicable pour le type '${type}'.`);
-        }
-      }
-    }
-  }
-
-  // --- Création de l'activité ---
   const newActivity = new Activity(activityData);
   return await newActivity.save();
 };

@@ -38,14 +38,13 @@ const progressItemSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
-const weeklyChall engeSchema = new mongoose.Schema({
+const weeklyChallengeSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
   
-  // ⭐ Objectifs multiples
   goals: {
     type: [goalSchema],
     required: true,
@@ -83,10 +82,8 @@ const weeklyChall engeSchema = new mongoose.Schema({
     required: true
   },
   
-  // ⭐ Progression par objectif
   progress: [progressItemSchema],
   
-  // ⭐ Progression globale
   overallProgress: {
     completedGoals: {
       type: Number,
@@ -109,7 +106,6 @@ const weeklyChall engeSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index pour performance
-weeklyChallenge Schema.index({ user: 1, startDate: -1 });
+weeklyChallengeSchema.index({ user: 1, startDate: -1 });
 
 module.exports = mongoose.model('WeeklyChallenge', weeklyChallengeSchema);
