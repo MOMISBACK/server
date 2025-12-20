@@ -258,22 +258,42 @@ class ChallengeService {
     return challenge;
   }
 
-  // ⭐ Calculer la progression d'un challenge
+  // ⭐ CORRIGÉ : Calculer la progression d'un challenge
   async calculateProgress(userId) {
-    const challenge = await WeeklyChallenge.findOne({
+    console.log('🔍 calculateProgress appelé pour user:', userId);
+    
+    // ✅ Chercher d'abord un challenge actif ou complété
+    let challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
-      status: { $in: ['active', 'pending', 'completed'] },
+      status: { $in: ['active', 'completed'] }, // ✅ Sans 'pending'
       endDate: { $gt: new Date() }
     })
     .populate('players.user', 'email totalDiamonds')
     .sort({ createdAt: -1 });
 
-    if (!challenge) return null;
+    // ✅ Si pas trouvé, chercher un challenge pending MAIS seulement si l'utilisateur N'EST PAS le créateur
+    if (!challenge) {
+      challenge = await WeeklyChallenge.findOne({
+        'players.user': userId,
+        creator: { $ne: userId }, // ✅ Exclure si l'utilisateur est le créateur
+        status: 'pending',
+        invitationStatus: 'pending',
+        endDate: { $gt: new Date() }
+      })
+      .populate('players.user', 'email totalDiamonds')
+      .sort({ createdAt: -1 });
+    }
+
+    if (!challenge) {
+      console.log('❌ Aucun challenge trouvé pour calculateProgress');
+      return null;
+    }
 
     console.log('📊 Calcul progression challenge:', {
       id: challenge._id,
       mode: challenge.mode,
-      status: challenge.status
+      status: challenge.status,
+      creatorId: challenge.creator
     });
 
     for (let i = 0; i < challenge.players.length; i++) {
@@ -327,6 +347,8 @@ class ChallengeService {
 
   // ⭐ CORRIGÉ : Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
+    console.log('🔍 getCurrentChallenge appelé pour user:', userId);
+    
     // Chercher d'abord un challenge actif ou complété
     let challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
@@ -336,23 +358,28 @@ class ChallengeService {
     .populate('players.user', 'email totalDiamonds')
     .sort({ createdAt: -1 });
 
-    // ✅ Si pas trouvé, chercher un challenge pending MAIS seulement si l'utilisateur N'EST PAS le créateur
-    if (!challenge) {
-      challenge = await WeeklyChallenge.findOne({
-        'players.user': userId,
-        creator: { $ne: userId }, // ✅ Exclure si l'utilisateur est le créateur
-        status: 'pending',
-        invitationStatus: 'pending',
-        endDate: { $gt: new Date() }
-      })
-      .populate('players.user', 'email totalDiamonds')
-      .sort({ createdAt: -1 });
-    }
-
     if (challenge) {
+      console.log(`✅ Challenge actif/complété trouvé: ${challenge._id}`);
       return await this.calculateProgress(userId);
     }
 
+    // ✅ Si pas trouvé, chercher un challenge pending MAIS seulement si l'utilisateur N'EST PAS le créateur
+    challenge = await WeeklyChallenge.findOne({
+      'players.user': userId,
+      creator: { $ne: userId }, // ✅ Exclure si l'utilisateur est le créateur
+      status: 'pending',
+      invitationStatus: 'pending',
+      endDate: { $gt: new Date() }
+    })
+    .populate('players.user', 'email totalDiamonds')
+    .sort({ createdAt: -1 });
+
+    if (challenge) {
+      console.log(`✅ Invitation pending trouvée: ${challenge._id} (user n'est pas créateur)`);
+      return await this.calculateProgress(userId);
+    }
+
+    console.log('❌ Aucun challenge trouvé pour cet utilisateur');
     return null;
   }
 
