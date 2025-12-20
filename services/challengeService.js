@@ -24,7 +24,7 @@ class ChallengeService {
       throw new Error('La valeur de l\'objectif doit être positive');
     }
 
-    // ✅ NEW: Vérifier que l'utilisateur n'a pas déjà un challenge actif
+    // ✅ Vérifier que l'utilisateur n'a pas déjà un challenge actif
     const existingActive = await WeeklyChallenge.findOne({
       'players.user': userId,
       status: 'active',
@@ -61,7 +61,7 @@ class ChallengeService {
     return challenge;
   }
 
-  // ⭐ AMÉLIORÉ : Créer un challenge DUO (avec invitation)
+  // ⭐ Créer un challenge DUO (avec invitation)
   async createDuoChallenge(creatorId, partnerId, data) {
     const { goal, activityTypes, title, icon } = data;
 
@@ -86,13 +86,12 @@ class ChallengeService {
       throw new Error('Vous ne pouvez pas vous inviter vous-même');
     }
 
-    // ✅ AMÉLIORÉ : Vérifier que le partenaire existe et est actif
+    // ✅ Vérifier que le partenaire existe et est actif
     const partner = await User.findById(partnerId).select('email isActive isBanned');
     if (!partner) {
       throw new Error('Partenaire introuvable');
     }
 
-    // ✅ NEW: Vérifier statut du partenaire
     if (partner.isBanned) {
       throw new Error('Ce partenaire ne peut pas participer aux challenges');
     }
@@ -114,7 +113,7 @@ class ChallengeService {
       throw new Error('Vous avez déjà une invitation en attente. Veuillez attendre la réponse.');
     }
 
-    // ✅ NEW: Vérifier que le créateur n'a pas déjà un challenge actif
+    // ✅ Vérifier que le créateur n'a pas déjà un challenge actif
     const creatorActiveChallenge = await WeeklyChallenge.findOne({
       'players.user': creatorId,
       status: 'active',
@@ -125,7 +124,7 @@ class ChallengeService {
       throw new Error('Vous avez déjà un challenge en cours');
     }
 
-    // ✅ NEW: Vérifier que le partenaire n'a pas déjà un challenge actif/pending
+    // ✅ Vérifier que le partenaire n'a pas déjà un challenge actif/pending
     const partnerActiveChallenge = await WeeklyChallenge.findOne({
       'players.user': partnerId,
       status: { $in: ['active', 'pending'] },
@@ -165,7 +164,7 @@ class ChallengeService {
     return challenge;
   }
 
-  // ⭐ AMÉLIORÉ : Accepter une invitation DUO (avec transaction)
+  // ⭐ Accepter une invitation DUO (avec transaction)
   async acceptInvitation(userId, challengeId) {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -173,7 +172,6 @@ class ChallengeService {
     try {
       console.log('🔄 Acceptation invitation:', { userId, challengeId });
 
-      // ✅ Trouver le challenge avec lock
       const challenge = await WeeklyChallenge.findById(challengeId).session(session);
       
       if (!challenge) {
@@ -184,47 +182,40 @@ class ChallengeService {
         throw new Error('Ce challenge n\'est pas en mode duo');
       }
 
-      // ✅ Vérifier que le challenge est en attente
       if (challenge.status !== 'pending' || challenge.invitationStatus !== 'pending') {
         throw new Error('Cette invitation n\'est plus disponible');
       }
 
-      // ✅ Vérifier que l'utilisateur est invité
       const isPlayer = challenge.players.some(p => p.user.toString() === userId.toString());
       if (!isPlayer) {
         throw new Error('Vous n\'êtes pas invité à ce challenge');
       }
 
-      // ✅ Vérifier que ce n'est pas le créateur
       if (challenge.creator.toString() === userId.toString()) {
         throw new Error('Vous ne pouvez pas accepter votre propre invitation');
       }
 
-      // ✅ Vérifier que l'utilisateur n'a pas déjà un challenge actif (AVEC LOCK)
       const userActiveChallenge = await WeeklyChallenge.findOne({
         'players.user': userId,
         status: { $in: ['active', 'pending'] },
         endDate: { $gt: new Date() },
-        _id: { $ne: challengeId } // Exclure le challenge en cours d'acceptation
+        _id: { $ne: challengeId }
       }).session(session);
 
       if (userActiveChallenge) {
         throw new Error('Vous avez déjà un challenge en cours');
       }
 
-      // ✅ Mettre à jour le challenge
       challenge.status = 'active';
       challenge.invitationStatus = 'accepted';
       await challenge.save({ session });
 
-      // ✅ Commit transaction
       await session.commitTransaction();
       
       console.log('✅ Invitation acceptée avec succès:', challengeId);
       return challenge;
 
     } catch (error) {
-      // ✅ Rollback en cas d'erreur
       await session.abortTransaction();
       console.error('❌ Erreur acceptation invitation:', error.message);
       throw error;
@@ -246,7 +237,6 @@ class ChallengeService {
       throw new Error('Ce challenge n\'est pas en mode duo');
     }
 
-    // ✅ Vérifier que le challenge est encore pending
     if (challenge.status !== 'pending' || challenge.invitationStatus !== 'pending') {
       throw new Error('Cette invitation n\'est plus disponible');
     }
@@ -299,11 +289,6 @@ class ChallengeService {
         type: { $in: challenge.activityTypes }
       });
 
-      console.log(`📊 Joueur ${i + 1}:`, {
-        userId: playerId,
-        activitiesTrouvees: activities.length
-      });
-
       let current = 0;
 
       switch (challenge.goal.type) {
@@ -327,16 +312,8 @@ class ChallengeService {
       challenge.players[i].progress = current;
       challenge.players[i].diamonds = diamonds;
       challenge.players[i].completed = completed;
-
-      console.log(`✅ Progression joueur ${i + 1}:`, {
-        progress: current,
-        diamonds,
-        completed,
-        pourcentage: Math.round((current / challenge.goal.value) * 100)
-      });
     }
 
-    // ✅ Vérifier et attribuer le bonus DUO
     if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
       if (challenge.checkBonus()) {
         console.log('🎉 Conditions bonus remplies !');
@@ -348,15 +325,29 @@ class ChallengeService {
     return challenge;
   }
 
-  // ⭐ Récupérer le challenge actif d'un utilisateur
+  // ⭐ CORRIGÉ : Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
-    const challenge = await WeeklyChallenge.findOne({
+    // Chercher d'abord un challenge actif ou complété
+    let challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
-      status: { $in: ['active', 'pending', 'completed'] },
+      status: { $in: ['active', 'completed'] },
       endDate: { $gt: new Date() }
     })
     .populate('players.user', 'email totalDiamonds')
     .sort({ createdAt: -1 });
+
+    // ✅ Si pas trouvé, chercher un challenge pending MAIS seulement si l'utilisateur N'EST PAS le créateur
+    if (!challenge) {
+      challenge = await WeeklyChallenge.findOne({
+        'players.user': userId,
+        creator: { $ne: userId }, // ✅ Exclure si l'utilisateur est le créateur
+        status: 'pending',
+        invitationStatus: 'pending',
+        endDate: { $gt: new Date() }
+      })
+      .populate('players.user', 'email totalDiamonds')
+      .sort({ createdAt: -1 });
+    }
 
     if (challenge) {
       return await this.calculateProgress(userId);
@@ -407,7 +398,6 @@ class ChallengeService {
     challenge.title = data.title || challenge.title;
     challenge.icon = data.icon || challenge.icon;
 
-    // Réinitialiser la progression
     challenge.players.forEach(player => {
       player.progress = 0;
       player.diamonds = 0;
@@ -420,7 +410,7 @@ class ChallengeService {
     return await this.calculateProgress(userId);
   }
 
-  // ⭐ AMÉLIORÉ : Supprimer/Quitter un challenge
+  // ⭐ Supprimer/Quitter un challenge
   async deleteChallenge(userId) {
     const challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
@@ -438,7 +428,6 @@ class ChallengeService {
       status: challenge.status
     });
 
-    // ✅ Finaliser avant de supprimer (attribuer les diamants)
     if (challenge.status !== 'completed') {
       console.log('💎 Finalisation avant suppression...');
       await this.finalizeChallenge(challenge._id);
@@ -450,7 +439,7 @@ class ChallengeService {
     return { success: true, message: 'Challenge supprimé avec succès' };
   }
 
-  // ✅ AMÉLIORÉ : Clôturer un challenge et attribuer les diamants
+  // ✅ Clôturer un challenge et attribuer les diamants
   async finalizeChallenge(challengeId) {
     const challenge = await WeeklyChallenge.findById(challengeId);
     
@@ -465,7 +454,6 @@ class ChallengeService {
     
     console.log('🏁 Clôture du challenge:', challengeId);
     
-    // ✅ Attribuer les diamants normaux à chaque joueur
     for (const player of challenge.players) {
       const playerId = typeof player.user === 'string' ? player.user : player.user._id;
       
@@ -482,12 +470,10 @@ class ChallengeService {
       }
     }
     
-    // ✅ Si DUO et bonus débloqué
     if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
       if (challenge.checkBonus()) {
         console.log('🎁 Attribution du BONUS DUO (doublement)...');
         
-        // Doubler les diamants (bonus)
         for (const player of challenge.players) {
           const playerId = typeof player.user === 'string' ? player.user : player.user._id;
           
@@ -504,8 +490,6 @@ class ChallengeService {
         
         challenge.bonusEarned = true;
         challenge.bonusAwarded = true;
-      } else {
-        console.log('⚠️ Bonus DUO non débloqué (tous les joueurs doivent compléter)');
       }
     }
     
@@ -523,9 +507,9 @@ class ChallengeService {
     
     let daysFromMonday;
     if (dayOfWeek === 0) {
-      daysFromMonday = 6; // Dimanche
+      daysFromMonday = 6;
     } else {
-      daysFromMonday = dayOfWeek - 1; // Lundi = 0
+      daysFromMonday = dayOfWeek - 1;
     }
     
     const thisMonday = new Date(now);

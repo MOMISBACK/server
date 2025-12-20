@@ -1,7 +1,10 @@
+// server/routes/adminRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 
+// Route pour nettoyer les indexes problématiques
 router.get('/fix-indexes', async (req, res) => {
   try {
     const db = mongoose.connection.db;
@@ -21,7 +24,7 @@ router.get('/fix-indexes', async (req, res) => {
     console.log('📋 Indexes avant:', results.before.map(i => i.name));
 
     // 2. Supprimer les anciens index problématiques
-    const toDrop = ['userId_1_startDate_1', 'user_1_startDate_1'];
+    const toDrop = ['userId_1_startDate_1', 'user_1_startDate_1', 'user_1_startDate_-1'];
     for (const indexName of toDrop) {
       try {
         await collection.dropIndex(indexName);

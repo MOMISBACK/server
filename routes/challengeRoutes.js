@@ -130,7 +130,7 @@ router.post('/:id/refuse', protect, async (req, res) => {
   }
 });
 
-// ✅ POST /api/challenges/:id/finalize - Clôturer et attribuer les diamants
+// POST /api/challenges/:id/finalize
 router.post('/:id/finalize', protect, async (req, res) => {
   try {
     const challenge = await challengeService.finalizeChallenge(req.params.id);

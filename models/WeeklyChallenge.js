@@ -261,7 +261,7 @@ weeklyChallengeSchema.methods.hasPlayer = function(userId) {
   return this.players.some(p => p.user.toString() === userId.toString());
 };
 
-// ✅ CORRIGÉ : Hook pre-save sans next()
+// ✅ Hook pre-save (sans next)
 weeklyChallengeSchema.pre('save', function() {
   if (this.mode === 'duo' && !this.bonusAwarded) {
     this.bonusEarned = this.checkBonus();
@@ -270,8 +270,6 @@ weeklyChallengeSchema.pre('save', function() {
   if (this.mode === 'duo' && this.status === 'pending' && this.invitationStatus === 'none') {
     this.invitationStatus = 'pending';
   }
-  
-  // Pas de next() !
 });
 
 // ✅ Hook post-save
