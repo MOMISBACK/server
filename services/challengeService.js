@@ -141,9 +141,10 @@ class ChallengeService {
 
   // ⭐ Calculer la progression d'un challenge
   async calculateProgress(userId) {
+    // ✅ CORRIGÉ : Inclure 'completed'
     const challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
-      status: { $in: ['active', 'pending'] },
+      status: { $in: ['active', 'pending', 'completed'] },
       endDate: { $gt: new Date() }
     })
     .populate('players.user', 'email totalDiamonds')
@@ -191,7 +192,7 @@ class ChallengeService {
           break;
       }
 
-      // ✅ CORRECTION : Diamants proportionnels (max 4 par joueur)
+      // ✅ Diamants proportionnels (max 4 par joueur)
       const diamonds = Math.min(
         Math.floor((current / challenge.goal.value) * 4),
         4
@@ -225,9 +226,10 @@ class ChallengeService {
 
   // ⭐ Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
+    // ✅ CORRIGÉ : Inclure 'completed'
     const challenge = await WeeklyChallenge.findOne({
       'players.user': userId,
-      status: { $in: ['active', 'pending'] },
+      status: { $in: ['active', 'pending', 'completed'] },
       endDate: { $gt: new Date() }
     })
     .populate('players.user', 'email totalDiamonds')

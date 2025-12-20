@@ -5,7 +5,7 @@ const router = express.Router();
 const { protect } = require('../middleware/authMiddleware');
 const challengeService = require('../services/challengeService');
 
-// ✅ GET /api/challenges/current - Récupérer le challenge actif
+// GET /api/challenges/current
 router.get('/current', protect, async (req, res) => {
   try {
     const challenge = await challengeService.getCurrentChallenge(req.user.id);
@@ -30,7 +30,7 @@ router.get('/current', protect, async (req, res) => {
   }
 });
 
-// ✅ GET /api/challenges/invitations - Récupérer les invitations en attente
+// GET /api/challenges/invitations
 router.get('/invitations', protect, async (req, res) => {
   try {
     const invitations = await challengeService.getPendingInvitations(req.user.id);
@@ -48,7 +48,7 @@ router.get('/invitations', protect, async (req, res) => {
   }
 });
 
-// ✅ POST /api/challenges - Créer un challenge (SOLO ou DUO)
+// POST /api/challenges
 router.post('/', protect, async (req, res) => {
   try {
     const { mode, partnerId, ...challengeData } = req.body;
@@ -58,7 +58,6 @@ router.post('/', protect, async (req, res) => {
     let challenge;
     
     if (mode === 'duo') {
-      // ✅ Mode DUO : invitation à un partenaire
       if (!partnerId) {
         return res.status(400).json({
           success: false,
@@ -72,7 +71,6 @@ router.post('/', protect, async (req, res) => {
         challengeData
       );
     } else {
-      // ✅ Mode SOLO (par défaut)
       challenge = await challengeService.createSoloChallenge(
         req.user.id,
         challengeData
@@ -94,7 +92,7 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// ✅ POST /api/challenges/:id/accept - Accepter une invitation
+// POST /api/challenges/:id/accept
 router.post('/:id/accept', protect, async (req, res) => {
   try {
     const challenge = await challengeService.acceptInvitation(req.user.id, req.params.id);
@@ -113,7 +111,7 @@ router.post('/:id/accept', protect, async (req, res) => {
   }
 });
 
-// ✅ POST /api/challenges/:id/refuse - Refuser une invitation
+// POST /api/challenges/:id/refuse
 router.post('/:id/refuse', protect, async (req, res) => {
   try {
     const challenge = await challengeService.refuseInvitation(req.user.id, req.params.id);
@@ -132,7 +130,26 @@ router.post('/:id/refuse', protect, async (req, res) => {
   }
 });
 
-// ✅ PUT /api/challenges/current - Mettre à jour le challenge actif
+// ✅ POST /api/challenges/:id/finalize - Clôturer et attribuer les diamants
+router.post('/:id/finalize', protect, async (req, res) => {
+  try {
+    const challenge = await challengeService.finalizeChallenge(req.params.id);
+    
+    res.json({
+      success: true,
+      data: challenge,
+      message: 'Challenge finalisé, diamants attribués !'
+    });
+  } catch (error) {
+    console.error('❌ Erreur POST /finalize:', error.message);
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// PUT /api/challenges/current
 router.put('/current', protect, async (req, res) => {
   try {
     const challenge = await challengeService.updateChallenge(req.user.id, req.body);
@@ -150,7 +167,7 @@ router.put('/current', protect, async (req, res) => {
   }
 });
 
-// ✅ DELETE /api/challenges/current - Supprimer le challenge actif
+// DELETE /api/challenges/current
 router.delete('/current', protect, async (req, res) => {
   try {
     await challengeService.deleteChallenge(req.user.id);
@@ -168,7 +185,7 @@ router.delete('/current', protect, async (req, res) => {
   }
 });
 
-// ✅ POST /api/challenges/refresh-progress - Recalculer la progression
+// POST /api/challenges/refresh-progress
 router.post('/refresh-progress', protect, async (req, res) => {
   try {
     const challenge = await challengeService.calculateProgress(req.user.id);
