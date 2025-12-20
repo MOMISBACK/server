@@ -8,6 +8,7 @@ const { validateCreateActivity } = require('../validators/activityValidators');
 router.use(protect);
 
 // Routes
+router.get('/duo/current', activityController.getCurrentDuoChallengeActivities);
 router.get('/', activityController.getActivities); // ✅ Corrigé : getActivities (pas getUserActivities)
 router.post('/', validateCreateActivity, activityController.createActivity);
 router.delete('/:id', activityController.deleteActivity);

@@ -1,6 +1,8 @@
 const activityService = require('../services/activityService');
 const asyncHandler = require('../middleware/asyncHandler');
 const { NotFoundError, ForbiddenError } = require('../utils/errors');
+const WeeklyChallenge = require('../models/WeeklyChallenge');
+const Activity = require('../models/Activity');
 
 /**
  * Creates a new activity.
@@ -28,6 +30,47 @@ const getActivities = asyncHandler(async (req, res) => {
   }
 
   const activities = await activityService.getActivities(query);
+  res.status(200).json(activities);
+});
+
+/**
+ * Gets activities that are counted for the current active DUO challenge.
+ * Returns activities from BOTH players, filtered by challenge date range and activityTypes.
+ */
+const getCurrentDuoChallengeActivities = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+
+  const challenge = await WeeklyChallenge.findOne({
+    mode: 'duo',
+    status: 'active',
+    'players.user': userId,
+    endDate: { $gt: new Date() },
+  })
+    .populate('players.user', 'email')
+    .sort({ createdAt: -1 });
+
+  if (!challenge) {
+    return res.status(200).json([]);
+  }
+
+  const playerIds = (challenge.players || [])
+    .map((p) => (typeof p.user === 'string' ? p.user : p.user?._id))
+    .filter(Boolean);
+
+  // Normaliser les dates comme dans calculateProgress
+  const startDateNormalized = new Date(challenge.startDate);
+  startDateNormalized.setHours(0, 0, 0, 0);
+  const endDateNormalized = new Date(challenge.endDate);
+  endDateNormalized.setHours(23, 59, 59, 999);
+
+  const activities = await Activity.find({
+    user: { $in: playerIds },
+    date: { $gte: startDateNormalized, $lte: endDateNormalized },
+    type: { $in: challenge.activityTypes },
+  })
+    .populate('user', 'email')
+    .sort({ date: -1, startTime: -1, createdAt: -1 });
+
   res.status(200).json(activities);
 });
 
@@ -72,6 +115,7 @@ const deleteActivity = asyncHandler(async (req, res) => {
 module.exports = {
   createActivity,
   getActivities,
+  getCurrentDuoChallengeActivities,
   getActivityById,
   deleteActivity,
 };
