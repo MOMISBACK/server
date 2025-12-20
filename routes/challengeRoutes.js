@@ -210,4 +210,38 @@ router.post('/refresh-progress', protect, async (req, res) => {
   }
 });
 
+// PUT /api/challenges/current - Mettre à jour le challenge actuel
+router.put('/current', protect, async (req, res) => {
+  try {
+    const { activityTypes, goal, title, icon } = req.body;
+    
+    const challenge = await challengeService.getCurrentChallenge(req.user.id);
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Aucun challenge actif à modifier'
+      });
+    }
+
+    // Mettre à jour les champs
+    if (activityTypes) challenge.activityTypes = activityTypes;
+    if (goal) challenge.goal = goal;
+    if (title) challenge.title = title;
+    if (icon !== undefined) challenge.icon = icon;
+
+    await challenge.save();
+
+    res.json({
+      success: true,
+      data: challenge
+    });
+  } catch (error) {
+    console.error('Erreur PUT /current:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;
