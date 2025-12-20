@@ -2,6 +2,7 @@
 
 const mongoose = require('mongoose');
 
+// ✅ SIMPLIFIÉ : Un seul objectif (au lieu d'un array)
 const goalSchema = new mongoose.Schema({
   type: {
     type: String,
@@ -15,11 +16,8 @@ const goalSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
-const progressItemSchema = new mongoose.Schema({
-  goalType: {
-    type: String,
-    enum: ['distance', 'duration', 'count']
-  },
+// ✅ SIMPLIFIÉ : Une seule progression (au lieu d'un array)
+const progressSchema = new mongoose.Schema({
   current: {
     type: Number,
     default: 0
@@ -45,21 +43,16 @@ const weeklyChallengeSchema = new mongoose.Schema({
     required: true
   },
   
-  goals: {
-    type: [goalSchema],
-    required: true,
-    validate: {
-      validator: function(v) {
-        return v && v.length > 0;
-      },
-      message: 'Au moins un objectif requis'
-    }
+  // ✅ SINGULAR : un seul objectif
+  goal: {
+    type: goalSchema,
+    required: true
   },
   
   activityTypes: {
     type: [String],
     required: true,
-    enum: ['running', 'cycling', 'walking', 'swimming', 'yoga', 'fitness', 'other']
+    enum: ['running', 'cycling', 'walking', 'swimming', 'yoga', 'workout']
   },
   
   title: {
@@ -82,25 +75,10 @@ const weeklyChallengeSchema = new mongoose.Schema({
     required: true
   },
   
-  progress: [progressItemSchema],
-  
-  overallProgress: {
-    completedGoals: {
-      type: Number,
-      default: 0
-    },
-    totalGoals: {
-      type: Number,
-      required: true
-    },
-    percentage: {
-      type: Number,
-      default: 0
-    },
-    isCompleted: {
-      type: Boolean,
-      default: false
-    }
+  // ✅ SINGULAR : une seule progression
+  progress: {
+    type: progressSchema,
+    required: true
   }
 }, {
   timestamps: true

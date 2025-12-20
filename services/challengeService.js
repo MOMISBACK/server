@@ -7,7 +7,12 @@ class ChallengeService {
   
   // ⭐ Créer un challenge
   async createChallenge(userId, data) {
-    const { goals, activityTypes, title, icon } = data;
+    const { goal, activityTypes, title, icon } = data;
+
+    // Validation : un seul objectif
+    if (!goal || !goal.type || !goal.value) {
+      throw new Error('Un objectif valide est requis');
+    }
 
     // Dates de la semaine (lundi-lundi)
     const now = new Date();
@@ -23,22 +28,15 @@ class ChallengeService {
 
     const challenge = new WeeklyChallenge({
       user: userId,
-      goals,
+      goal,
       activityTypes,
       title,
       icon,
       startDate: nextMonday,
       endDate: followingMonday,
-      progress: goals.map(g => ({
-        goalType: g.type,
+      progress: {
         current: 0,
-        goal: g.value,
-        percentage: 0,
-        isCompleted: false
-      })),
-      overallProgress: {
-        completedGoals: 0,
-        totalGoals: goals.length,
+        goal: goal.value,
         percentage: 0,
         isCompleted: false
       }
@@ -67,41 +65,27 @@ class ChallengeService {
       type: { $in: challenge.activityTypes }
     });
 
-    // ⭐ Calculer chaque objectif
-    challenge.progress = challenge.goals.map(goal => {
-      let current = 0;
+    // ⭐ Calculer la progression selon le type d'objectif
+    let current = 0;
 
-      switch (goal.type) {
-        case 'distance':
-          current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
-          break;
-        case 'duration':
-          current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
-          break;
-        case 'count':
-          current = activities.length;
-          break;
-      }
+    switch (challenge.goal.type) {
+      case 'distance':
+        current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
+        break;
+      case 'duration':
+        current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
+        break;
+      case 'count':
+        current = activities.length;
+        break;
+    }
 
-      const percentage = Math.min((current / goal.value) * 100, 100);
-      const isCompleted = current >= goal.value;
-
-      return {
-        goalType: goal.type,
-        current,
-        goal: goal.value,
-        percentage,
-        isCompleted
-      };
-    });
-
-    // ⭐ Progression globale
-    const completedGoals = challenge.progress.filter(p => p.isCompleted).length;
-    challenge.overallProgress = {
-      completedGoals,
-      totalGoals: challenge.goals.length,
-      percentage: (completedGoals / challenge.goals.length) * 100,
-      isCompleted: completedGoals === challenge.goals.length
+    // Mise à jour de la progression
+    challenge.progress = {
+      current,
+      goal: challenge.goal.value,
+      percentage: Math.min((current / challenge.goal.value) * 100, 100),
+      isCompleted: current >= challenge.goal.value
     };
 
     await challenge.save();
@@ -133,23 +117,20 @@ class ChallengeService {
       throw new Error('Aucun challenge actif');
     }
 
-    challenge.goals = data.goals;
+    // Validation : un seul objectif
+    if (!data.goal || !data.goal.type || !data.goal.value) {
+      throw new Error('Un objectif valide est requis');
+    }
+
+    challenge.goal = data.goal;
     challenge.activityTypes = data.activityTypes;
     challenge.title = data.title;
     challenge.icon = data.icon;
 
     // Réinitialiser la progression
-    challenge.progress = data.goals.map(g => ({
-      goalType: g.type,
+    challenge.progress = {
       current: 0,
-      goal: g.value,
-      percentage: 0,
-      isCompleted: false
-    }));
-
-    challenge.overallProgress = {
-      completedGoals: 0,
-      totalGoals: data.goals.length,
+      goal: data.goal.value,
       percentage: 0,
       isCompleted: false
     };
