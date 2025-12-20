@@ -307,25 +307,36 @@ class ChallengeService {
       const endDateNormalized = new Date(challenge.endDate);
       endDateNormalized.setHours(23, 59, 59, 999);
       
-      const activities = await Activity.find({
+      // Construire la requête d'activités
+      const activityQuery = {
         user: playerId,
         date: {
           $gte: startDateNormalized,
           $lte: endDateNormalized
         },
         type: { $in: challenge.activityTypes }
-      });
+      };
+
+      // ⚠️ Si le challenge est encore pending (invitation), ne compter
+      // que les activités créées APRÈS la création de l'invitation
+      if (challenge.status === 'pending' && challenge.createdAt) {
+        activityQuery.createdAt = { $gte: challenge.createdAt };
+      }
+
+      const activities = await Activity.find(activityQuery);
 
       console.log(`📋 Activités trouvées pour ${playerId}:`, {
         count: activities.length,
         startDate: startDateNormalized.toISOString(),
         endDate: endDateNormalized.toISOString(),
+        createdAfter: challenge.status === 'pending' && challenge.createdAt ? new Date(challenge.createdAt).toISOString() : null,
         activityTypes: challenge.activityTypes,
         activities: activities.map(a => ({
           date: new Date(a.date).toISOString(),
           type: a.type,
           distance: a.distance,
-          duration: a.duration
+          duration: a.duration,
+          createdAt: a.createdAt ? new Date(a.createdAt).toISOString() : null
         }))
       });
 
