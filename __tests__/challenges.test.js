@@ -6,51 +6,23 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const WeeklyChallenge = require('../models/WeeklyChallenge');
 const Activity = require('../models/Activity');
+const { createTestUserWithToken } = require('./helpers/authHelper');
 
 let authToken;
 let userId;
 
-beforeAll(async () => {
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  await User.deleteMany({});
-  await WeeklyChallenge.deleteMany({});
-  await Activity.deleteMany({});
-
-  const userRes = await request(app)
-    .post('/api/auth/register')
-    .send({
-      email: 'test-challenges@test.com',
-      password: 'Test123!'
-    });
-
-  console.log('🔍 Register response:', userRes.status, userRes.body);
-
-  if (userRes.status !== 201 || !userRes.body.token) {
-    throw new Error(`Échec register: ${JSON.stringify(userRes.body)}`);
-  }
-
-  authToken = userRes.body.token;
-  userId = userRes.body._id;  // ⭐ Directement _id (pas user._id)
-  
-  console.log('✅ User créé:', userId);
-}, 10000);
+beforeEach(async () => {
+  const { user, token } = await createTestUserWithToken();
+  authToken = token;
+  userId = user._id.toString();
+});
 
 afterAll(async () => {
-  try {
-    await User.deleteMany({});
-    await WeeklyChallenge.deleteMany({});
-    await Activity.deleteMany({});
-  } catch (error) {
-    console.log('⚠️ Erreur nettoyage:', error.message);
-  } finally {
-    await mongoose.connection.close();
-  }
+  await mongoose.connection.close();
 }, 10000);
 
 describe('🎯 Challenges API - Multi-objectifs', () => {
   test('POST /api/challenges - Créer avec 1 objectif', async () => {
-    await WeeklyChallenge.deleteMany({ user: userId });
     const res = await request(app)
       .post('/api/challenges')
       .set('Authorization', `Bearer ${authToken}`)
@@ -88,6 +60,17 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
   });
 
   test('GET /api/challenges/current - Récupérer le challenge actif', async () => {
+    // Créer un challenge d'abord (tests isolés)
+    await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        goal: { type: 'distance', value: 10 },
+        activityTypes: ['running'],
+        title: 'Current challenge',
+        icon: 'trophy-outline'
+      });
+
     const res = await request(app)
       .get('/api/challenges/current')
       .set('Authorization', `Bearer ${authToken}`);
@@ -152,6 +135,17 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
   });
 
   test('PUT /api/challenges/current - Modifier le challenge', async () => {
+    // Créer un challenge d'abord (tests isolés)
+    await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        goal: { type: 'distance', value: 10 },
+        activityTypes: ['running'],
+        title: 'To update',
+        icon: 'trophy-outline'
+      });
+
     const res = await request(app)
       .put('/api/challenges/current')
       .set('Authorization', `Bearer ${authToken}`)
@@ -168,6 +162,17 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
   });
 
   test('DELETE /api/challenges/current - Supprimer le challenge', async () => {
+    // Créer un challenge d'abord (tests isolés)
+    await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        goal: { type: 'distance', value: 10 },
+        activityTypes: ['running'],
+        title: 'To delete',
+        icon: 'trophy-outline'
+      });
+
     const res = await request(app)
       .delete('/api/challenges/current')
       .set('Authorization', `Bearer ${authToken}`);
@@ -227,13 +232,8 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
 
 describe('🎯 Duo / Invitations flows', () => {
   test('POST /api/challenges (duo) - Créer une invitation DUO', async () => {
-    // Créer le partenaire
-    const partnerRes = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'partner1@test.com', password: 'Partner123!' });
-
-    expect(partnerRes.status).toBe(201);
-    const partnerId = partnerRes.body._id;
+    const { user: partnerUser } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
 
     // Créer l'invitation en mode duo
     const createRes = await request(app)
@@ -256,13 +256,8 @@ describe('🎯 Duo / Invitations flows', () => {
   });
 
   test('POST /api/challenges (duo) - Empêcher invitations pendantes dupliquées', async () => {
-    // Créer un second partenaire
-    const p = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'partner2@test.com', password: 'Partner123!' });
-
-    expect(p.status).toBe(201);
-    const partnerId = p.body._id;
+    const { user: partnerUser } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
 
     // Première invitation
     const first = await request(app)
@@ -284,13 +279,8 @@ describe('🎯 Duo / Invitations flows', () => {
   });
 
   test('POST /api/challenges/:id/accept - Accepter une invitation', async () => {
-    // Créer partenaire et invitation
-    const partner = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'partner3@test.com', password: 'Partner123!' });
-
-    expect(partner.status).toBe(201);
-    const partnerId = partner.body._id;
+    const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
 
     const invite = await request(app)
       .post('/api/challenges')
@@ -299,14 +289,6 @@ describe('🎯 Duo / Invitations flows', () => {
 
     expect(invite.status).toBe(201);
     const challengeId = invite.body.data._id;
-
-    // Login partner to get token
-    const login = await request(app)
-      .post('/api/auth/login')
-      .send({ email: 'partner3@test.com', password: 'Partner123!' });
-
-    expect(login.status).toBe(200);
-    const partnerToken = login.body.token;
 
     const res = await request(app)
       .post(`/api/challenges/${challengeId}/accept`)
@@ -320,13 +302,8 @@ describe('🎯 Duo / Invitations flows', () => {
   });
 
   test('POST /api/challenges/:id/refuse - Refuser une invitation', async () => {
-    // Créer partenaire et invitation
-    const partner = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'partner4@test.com', password: 'Partner123!' });
-
-    expect(partner.status).toBe(201);
-    const partnerId = partner.body._id;
+    const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
 
     const invite = await request(app)
       .post('/api/challenges')
@@ -335,14 +312,6 @@ describe('🎯 Duo / Invitations flows', () => {
 
     expect(invite.status).toBe(201);
     const challengeId = invite.body.data._id;
-
-    // Login partner
-    const login = await request(app)
-      .post('/api/auth/login')
-      .send({ email: 'partner4@test.com', password: 'Partner123!' });
-
-    expect(login.status).toBe(200);
-    const partnerToken = login.body.token;
 
     const res = await request(app)
       .post(`/api/challenges/${challengeId}/refuse`)
@@ -356,13 +325,8 @@ describe('🎯 Duo / Invitations flows', () => {
   });
 
   test('POST /api/challenges/:id/finalize - Finaliser et attribuer diamants pour DUO', async () => {
-    // Créer partenaire et invitation
-    const partner = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'partner5@test.com', password: 'Partner123!' });
-
-    expect(partner.status).toBe(201);
-    const partnerId = partner.body._id;
+    const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
 
     const invite = await request(app)
       .post('/api/challenges')
@@ -371,14 +335,6 @@ describe('🎯 Duo / Invitations flows', () => {
 
     expect(invite.status).toBe(201);
     const challengeId = invite.body.data._id;
-
-    // Login partner and accept
-    const login = await request(app)
-      .post('/api/auth/login')
-      .send({ email: 'partner5@test.com', password: 'Partner123!' });
-
-    expect(login.status).toBe(200);
-    const partnerToken = login.body.token;
 
     const acceptRes = await request(app)
       .post(`/api/challenges/${challengeId}/accept`)

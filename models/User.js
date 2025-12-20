@@ -23,6 +23,37 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  // ✅ Partner links (up to 2 slots: p1, p2)
+  partnerLinks: [
+    {
+      slot: {
+        type: String,
+        enum: ['p1', 'p2'],
+        required: true,
+      },
+      partnerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      status: {
+        type: String,
+        enum: ['pending', 'confirmed'],
+        default: 'confirmed',
+      },
+    },
+  ],
+  // ✅ Active slot for current session ('p1', 'p2', or 'solo')
+  activeSlot: {
+    type: String,
+    enum: ['p1', 'p2', 'solo'],
+    default: 'solo',
+  },
+  // ✅ Whether the user has explicitly chosen a slot at least once
+  // Used to force the partner-selection screen only on first-time setup.
+  hasSelectedSlot: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true
 });

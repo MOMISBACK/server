@@ -151,7 +151,7 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: [],
-          goals: [{ type: 'distance', value: 50 }],  // ⭐ Nouveau format
+          goal: { type: 'distance', value: 50 },
           title: 'Défi test de validation',
         });
 
@@ -164,7 +164,7 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goals: [],  // ⭐ Vide
+          // goal manquant
           title: 'Défi test de validation',
         });
 
@@ -177,7 +177,7 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goals: [{ type: 'speed', value: 50 }],  // ⭐ Type invalide
+          goal: { type: 'speed', value: 50 },
           title: 'Défi test de validation',
         });
 
@@ -190,7 +190,7 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goals: [{ type: 'distance', value: 0 }],  // ⭐ Trop petit
+          goal: { type: 'distance', value: 0 },
           title: 'Défi test de validation',
         });
 
@@ -203,7 +203,7 @@ describe('🛡️ Validation Backend', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({
           activityTypes: ['running'],
-          goals: [{ type: 'distance', value: 50 }],
+          goal: { type: 'distance', value: 50 },
           title: 'Test',  // Accepté maintenant
         });
 

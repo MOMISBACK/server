@@ -1,7 +1,8 @@
-require('dotenv').config({ path: '.env.test' }); // ⚠️ IMPORTANT : Avant tout
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env.test') }); // ⚠️ IMPORTANT : Avant tout
 
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+const { MongoMemoryReplSet } = require('mongodb-memory-server');
 
 let mongoServer;
 
@@ -11,17 +12,22 @@ beforeAll(async () => {
       await mongoose.disconnect();
     }
 
-    mongoServer = await MongoMemoryServer.create({
+    mongoServer = await MongoMemoryReplSet.create({
       binary: {
         // 6.0.9 peut échouer à spawn sur certaines machines (ex: macOS arm64).
         // On laisse une version configurable + fallback récent.
         version: process.env.MONGOMS_VERSION || '7.0.14',
-        downloadDir: './mongodb-binaries',
+        downloadDir: path.resolve(__dirname, '..', 'mongodb-binaries'),
       },
-      instance: {
+      replSet: {
+        count: 1,
         dbName: 'test',
-        port: 27018,
       },
+      instanceOpts: [
+        {
+          port: 27018,
+        },
+      ],
     });
 
     const mongoUri = mongoServer.getUri();

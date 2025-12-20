@@ -1,5 +1,26 @@
 const userService = require('../services/userService');
 
+const normalizePartnerLinks = (partnerLinks) => {
+  const links = Array.isArray(partnerLinks) ? partnerLinks : [];
+  return links.map((link) => {
+    const partnerDoc = link?.partnerId && link.partnerId._id ? link.partnerId : null;
+    return {
+      slot: link.slot,
+      status: link.status,
+      partnerId: partnerDoc ? partnerDoc._id.toString() : link.partnerId?.toString?.() || null,
+      ...(partnerDoc
+        ? {
+            partner: {
+              _id: partnerDoc._id.toString(),
+              email: partnerDoc.email,
+              totalDiamonds: partnerDoc.totalDiamonds,
+            },
+          }
+        : {}),
+    };
+  });
+};
+
 /**
  * Gets the profile of the currently logged-in user.
  * The user object is attached to the request by the 'protect' middleware.
@@ -26,7 +47,141 @@ const getUsers = async (req, res) => {
   }
 };
 
+/**
+ * Gets user's partner links (P1, P2 slots)
+ */
+const getPartnerLinks = async (req, res) => {
+  try {
+    const user = await userService.getUserWithPartnerLinks(req.user.id);
+    res.json({
+      success: true,
+      data: {
+        partnerLinks: normalizePartnerLinks(user.partnerLinks),
+        activeSlot: user.activeSlot || 'solo',
+        hasSelectedSlot: Boolean(user.hasSelectedSlot),
+      },
+    });
+  } catch (error) {
+    console.error('❌ [getPartnerLinks]:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Updates user's partner links (P1, P2)
+ * Body: { p1: userId or null, p2: userId or null }
+ */
+const updatePartnerLinks = async (req, res) => {
+  try {
+    const { p1, p2 } = req.body;
+
+    if (p1 && p1 === req.user.id.toString()) {
+      return res.status(400).json({ success: false, message: 'Vous ne pouvez pas être votre propre partenaire' });
+    }
+    if (p2 && p2 === req.user.id.toString()) {
+      return res.status(400).json({ success: false, message: 'Vous ne pouvez pas être votre propre partenaire' });
+    }
+
+    const user = await userService.updateUserPartnerLinks(req.user.id, { p1, p2 });
+
+    res.json({
+      success: true,
+      data: {
+        partnerLinks: normalizePartnerLinks(user.partnerLinks),
+        activeSlot: user.activeSlot || 'solo',
+        hasSelectedSlot: Boolean(user.hasSelectedSlot),
+      },
+    });
+  } catch (error) {
+    console.error('❌ [updatePartnerLinks]:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Updates active slot (p1, p2, solo)
+ * Body: { activeSlot: 'p1' | 'p2' | 'solo' }
+ */
+const updateActiveSlot = async (req, res) => {
+  try {
+    const { activeSlot } = req.body;
+
+    if (!['p1', 'p2', 'solo'].includes(activeSlot)) {
+      return res.status(400).json({ success: false, message: 'Slot invalide' });
+    }
+
+    const user = await userService.updateUserActiveSlot(req.user.id, activeSlot);
+
+    res.json({
+      success: true,
+      data: {
+        partnerLinks: normalizePartnerLinks(user.partnerLinks),
+        activeSlot: user.activeSlot || 'solo',
+        hasSelectedSlot: Boolean(user.hasSelectedSlot),
+      },
+    });
+  } catch (error) {
+    console.error('❌ [updateActiveSlot]:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getUserProfile,
   getUsers,
+  getPartnerLinks,
+  updatePartnerLinks,
+  updateActiveSlot,
+  sendPartnerInvite: async (req, res) => {
+    try {
+      const { partnerId, slot } = req.body;
+      const invite = await userService.sendPartnerInvite({
+        fromUserId: req.user.id,
+        toUserId: partnerId,
+        slot,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          invite,
+        },
+      });
+    } catch (error) {
+      console.error('❌ [sendPartnerInvite]:', error);
+      res.status(400).json({ success: false, message: error.message });
+    }
+  },
+
+  getIncomingPartnerInvites: async (req, res) => {
+    try {
+      const invites = await userService.getIncomingPartnerInvites({ userId: req.user.id });
+      res.json({ success: true, data: { invites } });
+    } catch (error) {
+      console.error('❌ [getIncomingPartnerInvites]:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+
+  acceptPartnerInvite: async (req, res) => {
+    try {
+      const { inviteId } = req.params;
+      const invite = await userService.acceptPartnerInvite({ inviteId, userId: req.user.id });
+      res.json({ success: true, data: { invite } });
+    } catch (error) {
+      console.error('❌ [acceptPartnerInvite]:', error);
+      res.status(400).json({ success: false, message: error.message });
+    }
+  },
+
+  refusePartnerInvite: async (req, res) => {
+    try {
+      const { inviteId } = req.params;
+      const invite = await userService.refusePartnerInvite({ inviteId, userId: req.user.id });
+      res.json({ success: true, data: { invite } });
+    } catch (error) {
+      console.error('❌ [refusePartnerInvite]:', error);
+      res.status(400).json({ success: false, message: error.message });
+    }
+  },
 };

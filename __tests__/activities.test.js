@@ -2,6 +2,7 @@ const request = require('supertest');
 const express = require('express');
 const activityRoutes = require('../routes/activityRoutes');
 const Activity = require('../models/Activity');
+const User = require('../models/User');
 const { createTestUserWithToken } = require('./helpers/authHelper');
 
 function createTestApp() {
@@ -237,6 +238,69 @@ describe('🏃 Activities API', () => {
         .delete(`/api/activities/${activity._id}`);
 
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('GET /api/activities/shared/:partnerId', () => {
+    test('❌ Devrait refuser si le partenaire n\'est pas configuré', async () => {
+      const { user: stranger } = await createTestUserWithToken();
+
+      const res = await request(app)
+        .get(`/api/activities/shared/${stranger._id}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(403);
+    });
+
+    test('✅ Devrait retourner les activités des deux utilisateurs si partenaire lié', async () => {
+      const { user: partnerUser } = await createTestUserWithToken();
+
+      // Lier le partenaire au user courant
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            partnerLinks: [
+              {
+                slot: 'p1',
+                partnerId: partnerUser._id,
+                status: 'confirmed',
+              },
+            ],
+          },
+        },
+      );
+
+      await Activity.create({
+        user: user._id,
+        type: 'running',
+        title: 'Mine',
+        distance: 5,
+        duration: 30,
+        date: new Date(),
+        source: 'manual',
+      });
+
+      await Activity.create({
+        user: partnerUser._id,
+        type: 'running',
+        title: 'Partner',
+        distance: 7,
+        duration: 40,
+        date: new Date(),
+        source: 'manual',
+      });
+
+      const res = await request(app)
+        .get(`/api/activities/shared/${partnerUser._id}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBe(2);
+
+      const userIds = res.body.map((a) => (a.user?._id || a.user).toString());
+      expect(userIds).toEqual(expect.arrayContaining([user._id.toString(), partnerUser._id.toString()]));
     });
   });
 });

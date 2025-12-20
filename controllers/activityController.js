@@ -76,6 +76,40 @@ const getCurrentDuoChallengeActivities = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Gets shared activities between the logged-in user and a selected partner.
+ * This is used for the partner-slot combined history (outside challenge scope).
+ */
+const getSharedActivitiesWithPartner = asyncHandler(async (req, res) => {
+  const userId = req.user.id.toString();
+  const { partnerId } = req.params;
+
+  if (!partnerId) {
+    return res.status(400).json({ message: 'partnerId requis' });
+  }
+
+  // Security: only allow access if partnerId is configured in user's confirmed partner links
+  const links = Array.isArray(req.user.partnerLinks) ? req.user.partnerLinks : [];
+  const isAllowed = links.some(
+    (l) =>
+      l?.status === 'confirmed' &&
+      l?.partnerId &&
+      l.partnerId.toString() === partnerId.toString(),
+  );
+
+  if (!isAllowed) {
+    return res.status(403).json({ message: 'Accès refusé à ce partenaire' });
+  }
+
+  const activities = await Activity.find({
+    user: { $in: [userId, partnerId] },
+  })
+    .populate('user', 'email')
+    .sort({ date: -1, startTime: -1, createdAt: -1 });
+
+  res.status(200).json(activities);
+});
+
+/**
  * Gets a single activity by its ID.
  */
 const getActivityById = asyncHandler(async (req, res) => {
@@ -117,6 +151,7 @@ module.exports = {
   createActivity,
   getActivities,
   getCurrentDuoChallengeActivities,
+  getSharedActivitiesWithPartner,
   getActivityById,
   deleteActivity,
 };
