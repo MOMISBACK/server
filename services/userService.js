@@ -191,6 +191,19 @@ const acceptPartnerInvite = async ({ inviteId, userId }) => {
     await sender.save();
   }
 
+  // ✅ Also confirm on recipient side (so they can use the slot for DUO challenges)
+  const recipient = await User.findById(invite.toUser);
+  if (recipient) {
+    const existing = (recipient.partnerLinks || []).find((l) => l.slot === invite.slot);
+    if (existing?.partnerId && existing.partnerId.toString() !== invite.fromUser.toString()) {
+      throw new Error('Ce slot est déjà utilisé sur votre compte');
+    }
+
+    recipient.partnerLinks = (recipient.partnerLinks || []).filter((l) => l.slot !== invite.slot);
+    recipient.partnerLinks.push({ slot: invite.slot, partnerId: invite.fromUser, status: 'confirmed' });
+    await recipient.save();
+  }
+
   return invite;
 };
 

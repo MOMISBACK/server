@@ -301,6 +301,54 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(res.body.data.invitationStatus).toBe('accepted');
   });
 
+  test('✅ after accept: creator and invitee both see active current challenge', async () => {
+    const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
+
+    const invite = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ mode: 'duo', partnerId, goal: { type: 'distance', value: 5 }, activityTypes: ['running'], title: 'VisibilityAfterAccept', icon: 'bolt' });
+
+    expect(invite.status).toBe(201);
+    const challengeId = invite.body.data._id;
+
+    const acceptRes = await request(app)
+      .post(`/api/challenges/${challengeId}/accept`)
+      .set('Authorization', `Bearer ${partnerToken}`)
+      .send();
+
+    expect(acceptRes.status).toBe(200);
+    expect(acceptRes.body.success).toBe(true);
+    expect(acceptRes.body.data.status).toBe('active');
+
+    const currentAsCreator = await request(app)
+      .get('/api/challenges/current')
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(currentAsCreator.status).toBe(200);
+    expect(currentAsCreator.body.success).toBe(true);
+    expect(currentAsCreator.body.data._id).toBe(challengeId);
+    expect(currentAsCreator.body.data.status).toBe('active');
+
+    const currentAsInvitee = await request(app)
+      .get('/api/challenges/current')
+      .set('Authorization', `Bearer ${partnerToken}`);
+
+    expect(currentAsInvitee.status).toBe(200);
+    expect(currentAsInvitee.body.success).toBe(true);
+    expect(currentAsInvitee.body.data._id).toBe(challengeId);
+    expect(currentAsInvitee.body.data.status).toBe('active');
+
+    const pendingSent = await request(app)
+      .get('/api/challenges/pending-sent')
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(pendingSent.status).toBe(200);
+    expect(pendingSent.body.success).toBe(true);
+    expect(pendingSent.body.data).toBe(null);
+  });
+
   test('POST /api/challenges/:id/refuse - Refuser une invitation', async () => {
     const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
     const partnerId = partnerUser._id.toString();

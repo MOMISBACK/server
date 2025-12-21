@@ -70,6 +70,17 @@ describe('👥 Partner Invites API', () => {
     expect(p1After.partnerId).toBe(userB._id.toString());
     expect(p1After.status).toBe('confirmed');
 
+    // Recipient should also have the confirmed link on the same slot.
+    const partnerLinksResRecipient = await request(app)
+      .get('/api/users/partner-links')
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    expect(partnerLinksResRecipient.status).toBe(200);
+    const p1Recipient = partnerLinksResRecipient.body.data.partnerLinks.find((l) => l.slot === 'p1');
+    expect(p1Recipient).toBeTruthy();
+    expect(p1Recipient.partnerId).toBe(userA._id.toString());
+    expect(p1Recipient.status).toBe('confirmed');
+
     // Bonus: shared activities endpoint must be gated by confirmed links
     const sharedRes = await request(app)
       .get(`/api/activities/shared/${userB._id.toString()}`)
