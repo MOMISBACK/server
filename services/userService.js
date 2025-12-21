@@ -54,6 +54,16 @@ const getUserWithPartnerLinks = async (userId) => {
 const updateUserPartnerLinks = async (userId, data) => {
   const { p1, p2 } = data;
 
+  // Compute which partners are being removed so we can also unlink them reciprocally.
+  const existingUser = await User.findById(userId).select('partnerLinks');
+  const existingPartnerIds = new Set(
+    ((existingUser?.partnerLinks || [])
+      .filter((l) => l?.partnerId)
+      .map((l) => l.partnerId.toString()))
+  );
+  const nextPartnerIds = new Set([p1, p2].filter(Boolean).map((id) => id.toString()));
+  const removedPartnerIds = [...existingPartnerIds].filter((id) => !nextPartnerIds.has(id));
+
   const newPartnerLinks = [];
 
   if (p1) {
@@ -79,6 +89,32 @@ const updateUserPartnerLinks = async (userId, data) => {
   )
     .select('-password')
     .populate('partnerLinks.partnerId', 'email totalDiamonds');
+
+  // Also remove any reciprocal links left on the removed partners.
+  // Otherwise, user A can clear B, but B still has a confirmed/pending link to A,
+  // which blocks future invites with a "déjà lié" error.
+  if (removedPartnerIds.length > 0) {
+    await Promise.all(
+      removedPartnerIds.map(async (partnerId) => {
+        await User.updateOne(
+          { _id: partnerId },
+          { $pull: { partnerLinks: { partnerId: userId } } },
+        );
+
+        // Cancel any pending invites both ways between the two users.
+        await PartnerInvite.updateMany(
+          {
+            status: 'pending',
+            $or: [
+              { fromUser: userId, toUser: partnerId },
+              { fromUser: partnerId, toUser: userId },
+            ],
+          },
+          { $set: { status: 'cancelled' } },
+        );
+      }),
+    );
+  }
 
   return user;
 };
@@ -121,14 +157,41 @@ const sendPartnerInvite = async ({ fromUserId, toUserId, slot }) => {
     throw new Error('Utilisateur introuvable');
   }
 
-  const reciprocalExisting = (toUser.partnerLinks || []).find((l) => {
+  const toUserHasFromUser = (toUser.partnerLinks || []).some((l) => {
     if (!l?.partnerId) return false;
     const isSamePartner = l.partnerId.toString() === fromUserId.toString();
     const isActiveRelationship = l.status === 'pending' || l.status === 'confirmed';
     return isSamePartner && isActiveRelationship;
   });
-  if (reciprocalExisting) {
+
+  const fromUserHasToUser = (fromUser.partnerLinks || []).some((l) => {
+    if (!l?.partnerId) return false;
+    const isSamePartner = l.partnerId.toString() === toUserId.toString();
+    const isActiveRelationship = l.status === 'pending' || l.status === 'confirmed';
+    return isSamePartner && isActiveRelationship;
+  });
+
+  // Only block when the relationship is actually mutual.
+  // If the recipient has a stale one-sided link (common after older unlink flows), clean it.
+  if (toUserHasFromUser && fromUserHasToUser) {
     throw new Error('Vous êtes déjà lié à ce partenaire sur un autre slot');
+  }
+  if (toUserHasFromUser && !fromUserHasToUser) {
+    // If the recipient has an actual pending invite to the sender, this is not stale.
+    const pendingInviteFromRecipient = await PartnerInvite.findOne({
+      fromUser: toUserId,
+      toUser: fromUserId,
+      status: 'pending',
+    });
+    if (pendingInviteFromRecipient) {
+      throw new Error('Vous êtes déjà lié à ce partenaire sur un autre slot');
+    }
+
+    toUser.partnerLinks = (toUser.partnerLinks || []).filter((l) => {
+      if (!l?.partnerId) return true;
+      return l.partnerId.toString() !== fromUserId.toString();
+    });
+    await toUser.save();
   }
 
   const existingSlot = (fromUser.partnerLinks || []).find((l) => l.slot === slot);
