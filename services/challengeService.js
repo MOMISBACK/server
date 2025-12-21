@@ -6,6 +6,61 @@ const Activity = require('../models/Activity');
 const User = require('../models/User');
 
 class ChallengeService {
+
+  async _getConfirmedPartnerIdForSlot(userId, slot) {
+    if (slot !== 'p1' && slot !== 'p2') return null;
+    const user = await User.findById(userId).select('partnerLinks');
+    if (!user) return null;
+    const link = Array.isArray(user.partnerLinks)
+      ? user.partnerLinks.find(l => l?.slot === slot && l?.status === 'confirmed' && l?.partnerId)
+      : null;
+    return link?.partnerId ? link.partnerId.toString() : null;
+  }
+
+  _duoPairQuery(userId, partnerId) {
+    return {
+      mode: 'duo',
+      'players.user': { $all: [userId, partnerId] },
+    };
+  }
+
+  async _findCurrentChallengeDoc(userId, options = {}) {
+    const slot = options?.slot;
+    const now = new Date();
+
+    if (slot === 'solo') {
+      return WeeklyChallenge.findOne({
+        mode: 'solo',
+        'players.user': userId,
+        status: { $in: ['active', 'completed'] },
+        endDate: { $gt: now }
+      })
+        .populate('players.user', 'email totalDiamonds')
+        .sort({ createdAt: -1 });
+    }
+
+    if (slot === 'p1' || slot === 'p2') {
+      const partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
+      if (!partnerId) return null;
+
+      return WeeklyChallenge.findOne({
+        ...this._duoPairQuery(userId, partnerId),
+        status: { $in: ['active', 'completed'] },
+        endDate: { $gt: now }
+      })
+        .populate('players.user', 'email totalDiamonds')
+        .sort({ createdAt: -1 });
+    }
+
+    // Backward-compatible behavior: latest active/completed challenge regardless of slot.
+    return WeeklyChallenge.findOne({
+      'players.user': userId,
+      status: { $in: ['active', 'completed'] },
+      endDate: { $gt: now }
+    })
+      .populate('players.user', 'email totalDiamonds')
+      .sort({ createdAt: -1 });
+  }
   
   // ⭐ Créer un challenge SOLO
   async createSoloChallenge(userId, data) {
@@ -24,9 +79,10 @@ class ChallengeService {
       throw new Error('La valeur de l\'objectif doit être positive');
     }
 
-    // ✅ Vérifier que l'utilisateur n'a pas déjà un challenge actif
+    // ✅ Vérifier que l'utilisateur n'a pas déjà un challenge SOLO actif
     const existingActive = await WeeklyChallenge.findOne({
       'players.user': userId,
+      mode: 'solo',
       status: 'active',
       endDate: { $gt: new Date() }
     });
@@ -100,10 +156,11 @@ class ChallengeService {
       throw new Error('Ce partenaire n\'est pas actif');
     }
 
-    // ✅ Vérifier que le créateur n'a pas déjà une invitation pending
+    // ✅ Vérifier que le créateur n'a pas déjà une invitation pending avec ce partenaire
     const existingPending = await WeeklyChallenge.findOne({
       creator: creatorId,
       mode: 'duo',
+      'players.user': { $all: [creatorId, partnerId] },
       status: 'pending',
       invitationStatus: 'pending',
       endDate: { $gt: new Date() }
@@ -113,9 +170,10 @@ class ChallengeService {
       throw new Error('Vous avez déjà une invitation en attente. Veuillez attendre la réponse.');
     }
 
-    // ✅ Vérifier que le créateur n'a pas déjà un challenge actif
+    // ✅ Vérifier que le créateur n'a pas déjà un challenge DUO actif avec ce partenaire
     const creatorActiveChallenge = await WeeklyChallenge.findOne({
-      'players.user': creatorId,
+      mode: 'duo',
+      'players.user': { $all: [creatorId, partnerId] },
       status: 'active',
       endDate: { $gt: new Date() }
     });
@@ -124,9 +182,10 @@ class ChallengeService {
       throw new Error('Vous avez déjà un challenge en cours');
     }
 
-    // ✅ Vérifier que le partenaire n'a pas déjà un challenge actif/pending
+    // ✅ Vérifier que le partenaire n'a pas déjà un challenge DUO actif/pending avec ce créateur
     const partnerActiveChallenge = await WeeklyChallenge.findOne({
-      'players.user': partnerId,
+      mode: 'duo',
+      'players.user': { $all: [creatorId, partnerId] },
       status: { $in: ['active', 'pending'] },
       endDate: { $gt: new Date() }
     });
@@ -195,8 +254,10 @@ class ChallengeService {
         throw new Error('Vous ne pouvez pas accepter votre propre invitation');
       }
 
+      // Only prevent accepting if there is already another DUO involving the same pair.
       const userActiveChallenge = await WeeklyChallenge.findOne({
-        'players.user': userId,
+        mode: 'duo',
+        'players.user': { $all: [userId, challenge.creator] },
         status: { $in: ['active', 'pending'] },
         endDate: { $gt: new Date() },
         _id: { $ne: challengeId }
@@ -259,30 +320,12 @@ class ChallengeService {
   }
 
   // ⭐ CORRIGÉ : Calculer la progression d'un challenge
-  async calculateProgress(userId) {
+  async calculateProgress(userId, options = {}) {
     console.log('🔍 calculateProgress appelé pour user:', userId);
-    
-    // ✅ Chercher d'abord un challenge actif ou complété
-    let challenge = await WeeklyChallenge.findOne({
-      'players.user': userId,
-      status: { $in: ['active', 'completed'] }, // ✅ Sans 'pending'
-      endDate: { $gt: new Date() }
-    })
-    .populate('players.user', 'email totalDiamonds')
-    .sort({ createdAt: -1 });
 
-    // ✅ Si pas trouvé, chercher un challenge pending MAIS seulement si l'utilisateur N'EST PAS le créateur
-    if (!challenge) {
-      challenge = await WeeklyChallenge.findOne({
-        'players.user': userId,
-        creator: { $ne: userId }, // ✅ Exclure si l'utilisateur est le créateur
-        status: 'pending',
-        invitationStatus: 'pending',
-        endDate: { $gt: new Date() }
-      })
-      .populate('players.user', 'email totalDiamonds')
-      .sort({ createdAt: -1 });
-    }
+    // Slot-aware: when slot is provided, only compute that slot's challenge.
+    // Pending invitations are handled via /invitations and are not returned here.
+    const challenge = await this._findCurrentChallengeDoc(userId, options);
 
     if (!challenge) {
       console.log('❌ Aucun challenge trouvé pour calculateProgress');
@@ -377,35 +420,11 @@ class ChallengeService {
   // ⭐ CORRIGÉ : Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
     console.log('🔍 getCurrentChallenge appelé pour user:', userId);
-    
-    // Chercher d'abord un challenge actif ou complété
-    let challenge = await WeeklyChallenge.findOne({
-      'players.user': userId,
-      status: { $in: ['active', 'completed'] },
-      endDate: { $gt: new Date() }
-    })
-    .populate('players.user', 'email totalDiamonds')
-    .sort({ createdAt: -1 });
-
+    // Backward-compatible: return latest computed challenge
+    const challenge = await this.calculateProgress(userId);
     if (challenge) {
-      console.log(`✅ Challenge actif/complété trouvé: ${challenge._id}`);
-      return await this.calculateProgress(userId);
-    }
-
-    // ✅ Si pas trouvé, chercher un challenge pending MAIS seulement si l'utilisateur N'EST PAS le créateur
-    challenge = await WeeklyChallenge.findOne({
-      'players.user': userId,
-      creator: { $ne: userId }, // ✅ Exclure si l'utilisateur est le créateur
-      status: 'pending',
-      invitationStatus: 'pending',
-      endDate: { $gt: new Date() }
-    })
-    .populate('players.user', 'email totalDiamonds')
-    .sort({ createdAt: -1 });
-
-    if (challenge) {
-      console.log(`✅ Invitation pending trouvée: ${challenge._id} (user n'est pas créateur)`);
-      return await this.calculateProgress(userId);
+      console.log(`✅ Challenge trouvé: ${challenge._id}`);
+      return challenge;
     }
 
     console.log('❌ Aucun challenge trouvé pour cet utilisateur');
@@ -430,14 +449,27 @@ class ChallengeService {
   }
 
   // ⭐ Récupérer l'invitation envoyée (pending) par le créateur
-  async getPendingSentChallenge(userId) {
-    const challenge = await WeeklyChallenge.findOne({
+  async getPendingSentChallenge(userId, options = {}) {
+    const slot = options?.slot;
+    const now = new Date();
+
+    let query = {
       creator: userId,
       mode: 'duo',
       status: 'pending',
       invitationStatus: 'pending',
-      endDate: { $gt: new Date() },
-    })
+      endDate: { $gt: now },
+    };
+
+    if (slot === 'p1' || slot === 'p2') {
+      const partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
+      if (!partnerId) return null;
+      query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+    } else if (slot === 'solo') {
+      return null;
+    }
+
+    const challenge = await WeeklyChallenge.findOne(query)
       .populate('creator', 'email')
       .populate('players.user', 'email totalDiamonds')
       .sort({ createdAt: -1 });
@@ -446,12 +478,25 @@ class ChallengeService {
   }
 
   // ⭐ Mettre à jour un challenge
-  async updateChallenge(userId, data) {
-    const challenge = await WeeklyChallenge.findOne({
+  async updateChallenge(userId, data, options = {}) {
+    const slot = options?.slot;
+    const now = new Date();
+
+    let query = {
       creator: userId,
       status: { $in: ['active', 'pending'] },
-      endDate: { $gt: new Date() }
-    });
+      endDate: { $gt: now }
+    };
+
+    if (slot === 'solo') {
+      query = { ...query, mode: 'solo' };
+    } else if (slot === 'p1' || slot === 'p2') {
+      const partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
+      if (!partnerId) throw new Error('Aucun partenaire actif pour ce slot');
+      query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+    }
+
+    const challenge = await WeeklyChallenge.findOne(query);
 
     if (!challenge) {
       throw new Error('Aucun challenge actif ou vous n\'êtes pas le créateur');
@@ -479,16 +524,29 @@ class ChallengeService {
     await challenge.save();
     console.log('✅ Challenge mis à jour:', challenge._id);
     
-    return await this.calculateProgress(userId);
+    return await this.calculateProgress(userId, options);
   }
 
   // ⭐ Supprimer/Quitter un challenge
-  async deleteChallenge(userId) {
-    const challenge = await WeeklyChallenge.findOne({
+  async deleteChallenge(userId, options = {}) {
+    const slot = options?.slot;
+    const now = new Date();
+
+    let query = {
       'players.user': userId,
       status: { $in: ['active', 'pending', 'completed'] },
-      endDate: { $gt: new Date() }
-    });
+      endDate: { $gt: now }
+    };
+
+    if (slot === 'solo') {
+      query = { ...query, mode: 'solo' };
+    } else if (slot === 'p1' || slot === 'p2') {
+      const partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
+      if (!partnerId) throw new Error('Aucun partenaire actif pour ce slot');
+      query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+    }
+
+    const challenge = await WeeklyChallenge.findOne(query);
 
     if (!challenge) {
       throw new Error('Aucun challenge actif');

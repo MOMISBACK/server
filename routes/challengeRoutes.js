@@ -8,7 +8,10 @@ const challengeService = require('../services/challengeService');
 // GET /api/challenges/current
 router.get('/current', protect, async (req, res) => {
   try {
-    const challenge = await challengeService.getCurrentChallenge(req.user.id);
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    const challenge = slot
+      ? await challengeService.calculateProgress(req.user.id, { slot })
+      : await challengeService.getCurrentChallenge(req.user.id);
     
     if (!challenge) {
       return res.status(404).json({
@@ -52,7 +55,8 @@ router.get('/invitations', protect, async (req, res) => {
 // Invitation DUO envoyée par l'utilisateur (en attente)
 router.get('/pending-sent', protect, async (req, res) => {
   try {
-    const pendingSent = await challengeService.getPendingSentChallenge(req.user.id);
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    const pendingSent = await challengeService.getPendingSentChallenge(req.user.id, slot ? { slot } : undefined);
     res.json({
       success: true,
       data: pendingSent,
@@ -170,7 +174,8 @@ router.post('/:id/finalize', protect, async (req, res) => {
 // PUT /api/challenges/current
 router.put('/current', protect, async (req, res) => {
   try {
-    const challenge = await challengeService.updateChallenge(req.user.id, req.body);
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    const challenge = await challengeService.updateChallenge(req.user.id, req.body, slot ? { slot } : undefined);
     
     res.json({
       success: true,
@@ -188,7 +193,8 @@ router.put('/current', protect, async (req, res) => {
 // DELETE /api/challenges/current
 router.delete('/current', protect, async (req, res) => {
   try {
-    await challengeService.deleteChallenge(req.user.id);
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    await challengeService.deleteChallenge(req.user.id, slot ? { slot } : undefined);
     
     res.json({
       success: true,
@@ -206,7 +212,8 @@ router.delete('/current', protect, async (req, res) => {
 // POST /api/challenges/refresh-progress
 router.post('/refresh-progress', protect, async (req, res) => {
   try {
-    const challenge = await challengeService.calculateProgress(req.user.id);
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    const challenge = await challengeService.calculateProgress(req.user.id, slot ? { slot } : undefined);
     
     if (!challenge) {
       return res.status(404).json({
@@ -221,40 +228,6 @@ router.post('/refresh-progress', protect, async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur refresh-progress:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// PUT /api/challenges/current - Mettre à jour le challenge actuel
-router.put('/current', protect, async (req, res) => {
-  try {
-    const { activityTypes, goal, title, icon } = req.body;
-    
-    const challenge = await challengeService.getCurrentChallenge(req.user.id);
-    if (!challenge) {
-      return res.status(404).json({
-        success: false,
-        message: 'Aucun challenge actif à modifier'
-      });
-    }
-
-    // Mettre à jour les champs
-    if (activityTypes) challenge.activityTypes = activityTypes;
-    if (goal) challenge.goal = goal;
-    if (title) challenge.title = title;
-    if (icon !== undefined) challenge.icon = icon;
-
-    await challenge.save();
-
-    res.json({
-      success: true,
-      data: challenge
-    });
-  } catch (error) {
-    console.error('Erreur PUT /current:', error);
     res.status(500).json({
       success: false,
       message: error.message
