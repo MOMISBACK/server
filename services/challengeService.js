@@ -630,6 +630,52 @@ class ChallengeService {
     return challenge;
   }
 
+  // ⭐ Historique des challenges DUO (entre l'utilisateur et son partenaire de slot)
+  async getDuoChallengeHistory(userId, options = {}) {
+    const slot = options?.slot;
+    const partnerIdFromQuery = options?.partnerId;
+
+    let partnerId = null;
+    if (partnerIdFromQuery) {
+      partnerId = partnerIdFromQuery;
+    } else {
+      if (slot !== 'p1' && slot !== 'p2') {
+        throw new Error('Slot invalide (p1/p2 requis)');
+      }
+      partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
+    }
+
+    if (!partnerId) return [];
+
+    const query = {
+      ...this._duoPairQuery(userId, partnerId),
+      status: { $in: ['active', 'completed'] },
+    };
+
+    const challenges = await WeeklyChallenge.find(query)
+      .populate('creator', 'email')
+      .populate('players.user', 'email totalDiamonds')
+      .sort({ startDate: -1, createdAt: -1 });
+
+    return Array.isArray(challenges) ? challenges : [];
+  }
+
+  // ⭐ Historique des challenges SOLO de l'utilisateur
+  async getSoloChallengeHistory(userId) {
+    const query = {
+      mode: 'solo',
+      'players.user': userId,
+      status: { $in: ['active', 'completed'] },
+    };
+
+    const challenges = await WeeklyChallenge.find(query)
+      .populate('creator', 'email')
+      .populate('players.user', 'email totalDiamonds')
+      .sort({ startDate: -1, createdAt: -1 });
+
+    return Array.isArray(challenges) ? challenges : [];
+  }
+
   // ⭐ Helper : calculer les dates de la semaine
   _calculateWeekDates() {
     const now = new Date();

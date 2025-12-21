@@ -427,3 +427,87 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(u2.totalDiamonds).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('📚 Challenge history endpoints', () => {
+  test('GET /api/challenges/solo/history - retourne les challenges SOLO de l’utilisateur', async () => {
+    // Create a solo challenge
+    const createRes = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        goal: { type: 'distance', value: 10 },
+        activityTypes: ['running'],
+        title: 'Solo History',
+        icon: 'trophy-outline'
+      });
+
+    expect(createRes.status).toBe(201);
+
+    const res = await request(app)
+      .get('/api/challenges/solo/history')
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(1);
+    expect(res.body.data[0].mode).toBe('solo');
+    expect(res.body.data[0].status).toBeDefined();
+  });
+
+  test('GET /api/challenges/duo/history?partnerId=... - retourne les challenges DUO pour la paire (pair-based)', async () => {
+    const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
+
+    const createRes = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        mode: 'duo',
+        partnerId,
+        goal: { type: 'count', value: 2 },
+        activityTypes: ['running'],
+        title: 'Duo History',
+        icon: 'heart'
+      });
+
+    expect(createRes.status).toBe(201);
+    const challengeId = createRes.body?.data?._id;
+    expect(challengeId).toBeDefined();
+
+    // Accept as partner so challenge becomes active
+    const acceptRes = await request(app)
+      .post(`/api/challenges/${challengeId}/accept`)
+      .set('Authorization', `Bearer ${partnerToken}`);
+    expect(acceptRes.status).toBe(200);
+
+    const res = await request(app)
+      .get('/api/challenges/duo/history')
+      .query({ partnerId })
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(1);
+    expect(res.body.data[0].mode).toBe('duo');
+    expect(['active', 'completed']).toContain(res.body.data[0].status);
+  });
+
+  test('GET /api/challenges/duo/history - rejette sans partnerId et avec slot invalide', async () => {
+    const res = await request(app)
+      .get('/api/challenges/duo/history')
+      .query({ slot: 'solo' })
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('GET /api/challenges/solo/history - rejette sans authentification', async () => {
+    const res = await request(app)
+      .get('/api/challenges/solo/history');
+
+    expect(res.status).toBe(401);
+  });
+});

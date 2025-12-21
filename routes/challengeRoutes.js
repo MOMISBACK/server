@@ -70,6 +70,44 @@ router.get('/pending-sent', protect, async (req, res) => {
   }
 });
 
+// GET /api/challenges/duo/history
+// Historique des challenges DUO entre l'utilisateur et son partenaire (slot p1/p2)
+router.get('/duo/history', protect, async (req, res) => {
+  try {
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    const partnerId = typeof req.query?.partnerId === 'string' ? req.query.partnerId : undefined;
+    const history = await challengeService.getDuoChallengeHistory(req.user.id, { slot, partnerId });
+    res.json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    console.error('Erreur GET /duo/history:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// GET /api/challenges/solo/history
+// Historique des challenges SOLO de l'utilisateur
+router.get('/solo/history', protect, async (req, res) => {
+  try {
+    const history = await challengeService.getSoloChallengeHistory(req.user.id);
+    res.json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    console.error('Erreur GET /solo/history:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // POST /api/challenges
 router.post('/', protect, async (req, res) => {
   try {
