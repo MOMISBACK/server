@@ -121,9 +121,40 @@ const sendPartnerInvite = async ({ fromUserId, toUserId, slot }) => {
     throw new Error('Utilisateur introuvable');
   }
 
+  const reciprocalExisting = (toUser.partnerLinks || []).find((l) => {
+    if (!l?.partnerId) return false;
+    const isSamePartner = l.partnerId.toString() === fromUserId.toString();
+    const isActiveRelationship = l.status === 'pending' || l.status === 'confirmed';
+    return isSamePartner && isActiveRelationship;
+  });
+  if (reciprocalExisting) {
+    throw new Error('Vous êtes déjà lié à ce partenaire sur un autre slot');
+  }
+
   const existingSlot = (fromUser.partnerLinks || []).find((l) => l.slot === slot);
   if (existingSlot?.partnerId) {
     throw new Error('Ce slot est déjà utilisé (invitation en attente ou partenaire confirmé)');
+  }
+
+  const samePartnerOtherSlot = (fromUser.partnerLinks || []).find((l) => {
+    if (!l?.partnerId) return false;
+    const isSamePartner = l.partnerId.toString() === toUserId.toString();
+    const isOtherSlot = l.slot !== slot;
+    const isActiveRelationship = l.status === 'pending' || l.status === 'confirmed';
+    return isSamePartner && isOtherSlot && isActiveRelationship;
+  });
+  if (samePartnerOtherSlot) {
+    throw new Error('Ce partenaire est déjà utilisé sur un autre slot');
+  }
+
+  const existingInviteOtherSlot = await PartnerInvite.findOne({
+    fromUser: fromUserId,
+    toUser: toUserId,
+    slot: { $ne: slot },
+    status: 'pending',
+  });
+  if (existingInviteOtherSlot) {
+    throw new Error('Une invitation est déjà en attente pour ce partenaire sur un autre slot');
   }
 
   const existingInvite = await PartnerInvite.findOne({

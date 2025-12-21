@@ -150,6 +150,44 @@ describe('👥 Partner Invites API', () => {
     expect(second.status).toBe(400);
   });
 
+  test('❌ cannot invite same user on two slots', async () => {
+    const { user: userA, token: tokenA } = await createTestUserWithToken();
+    const { user: userB } = await createTestUserWithToken();
+
+    const first = await request(app)
+      .post('/api/users/partner-invites')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ slot: 'p1', partnerId: userB._id.toString() });
+
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post('/api/users/partner-invites')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ slot: 'p2', partnerId: userB._id.toString() });
+
+    expect(second.status).toBe(400);
+  });
+
+  test('❌ cannot invite a user who already has you on the other slot (reciprocal)', async () => {
+    const { user: userA, token: tokenA } = await createTestUserWithToken();
+    const { user: userB, token: tokenB } = await createTestUserWithToken();
+
+    const first = await request(app)
+      .post('/api/users/partner-invites')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ slot: 'p1', partnerId: userA._id.toString() });
+
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post('/api/users/partner-invites')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ slot: 'p2', partnerId: userB._id.toString() });
+
+    expect(second.status).toBe(400);
+  });
+
   test('❌ only the invite recipient can accept/refuse', async () => {
     const { user: userA, token: tokenA } = await createTestUserWithToken();
     const { user: userB, token: tokenB } = await createTestUserWithToken();
