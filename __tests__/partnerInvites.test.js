@@ -120,6 +120,107 @@ describe('👥 Partner Invites API', () => {
     expect(p2).toBeFalsy();
   });
 
+  test('✅ cancel (clear slot) prevents later accept (no one-sided partner)', async () => {
+    const { user: userA, token: tokenA } = await createTestUserWithToken();
+    const { user: userB, token: tokenB } = await createTestUserWithToken();
+
+    const sendRes = await request(app)
+      .post('/api/users/partner-invites')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ slot: 'p1', partnerId: userB._id.toString() });
+
+    expect(sendRes.status).toBe(200);
+
+    // Grab invite id before cancellation (simulates recipient holding the id)
+    const incomingBefore = await request(app)
+      .get('/api/users/partner-invites/incoming')
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    expect(incomingBefore.status).toBe(200);
+    expect(incomingBefore.body.data.invites.length).toBe(1);
+    const inviteId = incomingBefore.body.data.invites[0]._id;
+
+    // Sender cancels by clearing partner links
+    const cancelRes = await request(app)
+      .put('/api/users/partner-links')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ p1: null, p2: null });
+
+    expect(cancelRes.status).toBe(200);
+
+    // Recipient tries to accept the now-cancelled invite id
+    const acceptAfterCancel = await request(app)
+      .post(`/api/users/partner-invites/${inviteId}/accept`)
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    expect(acceptAfterCancel.status).toBe(400);
+
+    // Recipient must not end up with a confirmed link
+    const linksB = await request(app)
+      .get('/api/users/partner-links')
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    expect(linksB.status).toBe(200);
+    const anyLinkToA = (linksB.body.data.partnerLinks || []).find((l) => l.partnerId === userA._id.toString());
+    expect(anyLinkToA).toBeFalsy();
+  });
+
+  test('✅ refuse removes any stale links both sides (defensive)', async () => {
+    const { user: userA, token: tokenA } = await createTestUserWithToken();
+    const { user: userB, token: tokenB } = await createTestUserWithToken();
+
+    // A sends an invite on p2
+    await request(app)
+      .post('/api/users/partner-invites')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ slot: 'p2', partnerId: userB._id.toString() });
+
+    // Simulate a corrupted/stale state where A also has a confirmed link to B elsewhere,
+    // and B has a one-sided confirmed link back to A.
+    await User.updateOne(
+      { _id: userA._id },
+      {
+        $push: {
+          partnerLinks: { slot: 'p1', partnerId: userB._id, status: 'confirmed' },
+        },
+      },
+    );
+    await User.updateOne(
+      { _id: userB._id },
+      {
+        $push: {
+          partnerLinks: { slot: 'p1', partnerId: userA._id, status: 'confirmed' },
+        },
+      },
+    );
+
+    const incomingRes = await request(app)
+      .get('/api/users/partner-invites/incoming')
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    const inviteId = incomingRes.body.data.invites[0]._id;
+
+    const refuseRes = await request(app)
+      .post(`/api/users/partner-invites/${inviteId}/refuse`)
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    expect(refuseRes.status).toBe(200);
+
+    const aLinks = await request(app)
+      .get('/api/users/partner-links')
+      .set('Authorization', `Bearer ${tokenA}`);
+
+    expect(aLinks.status).toBe(200);
+    expect(aLinks.body.data.partnerLinks.some((l) => l.partnerId === userB._id.toString())).toBe(false);
+
+    const bLinks = await request(app)
+      .get('/api/users/partner-links')
+      .set('Authorization', `Bearer ${tokenB}`);
+
+    expect(bLinks.status).toBe(200);
+    expect(bLinks.body.data.partnerLinks.some((l) => l.partnerId === userA._id.toString())).toBe(false);
+  });
+
   test('❌ cannot invite yourself', async () => {
     const { user: userA, token: tokenA } = await createTestUserWithToken();
 

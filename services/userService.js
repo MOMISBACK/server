@@ -266,6 +266,23 @@ const acceptPartnerInvite = async ({ inviteId, userId }) => {
     throw new Error('Invitation déjà traitée');
   }
 
+  // If the sender cancelled locally (cleared partnerLinks) but the invite doc somehow
+  // remained pending, do NOT allow a one-sided confirmation.
+  const senderBeforeAccept = await User.findById(invite.fromUser).select('partnerLinks');
+  const senderStillHasPendingLink = Boolean(
+    (senderBeforeAccept?.partnerLinks || []).some((l) => {
+      if (l.slot !== invite.slot) return false;
+      if (!l.partnerId) return false;
+      const isSamePartner = l.partnerId.toString() === invite.toUser.toString();
+      return isSamePartner && l.status === 'pending';
+    }),
+  );
+  if (!senderStillHasPendingLink) {
+    invite.status = 'cancelled';
+    await invite.save();
+    throw new Error('Invitation annulée');
+  }
+
   invite.status = 'accepted';
   await invite.save();
 
@@ -318,16 +335,30 @@ const refusePartnerInvite = async ({ inviteId, userId }) => {
   invite.status = 'refused';
   await invite.save();
 
-  // Clear sender slot if it matches this invite
-  const sender = await User.findById(invite.fromUser);
-  if (sender) {
-    sender.partnerLinks = (sender.partnerLinks || []).filter((l) => {
-      if (l.slot !== invite.slot) return true;
-      if (!l.partnerId) return true;
-      return l.partnerId.toString() !== invite.toUser.toString();
-    });
-    await sender.save();
-  }
+  // Defensive cleanup: refusing must never result in a visible/active partnership.
+  // Remove any partnerLinks between the two users (any slot, any status) on BOTH sides,
+  // to guard against stale/one-sided links from older flows.
+  await Promise.all([
+    User.updateOne(
+      { _id: invite.fromUser },
+      { $pull: { partnerLinks: { partnerId: invite.toUser } } },
+    ),
+    User.updateOne(
+      { _id: invite.toUser },
+      { $pull: { partnerLinks: { partnerId: invite.fromUser } } },
+    ),
+    // Also cancel any other pending invites both ways (keeps UI consistent).
+    PartnerInvite.updateMany(
+      {
+        status: 'pending',
+        $or: [
+          { fromUser: invite.fromUser, toUser: invite.toUser },
+          { fromUser: invite.toUser, toUser: invite.fromUser },
+        ],
+      },
+      { $set: { status: 'cancelled' } },
+    ),
+  ]);
 
   return invite;
 };
