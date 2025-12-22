@@ -8,6 +8,8 @@ const {
 	updatePartnerLinks,
 	updateActiveSlot,
 	updateUsername,
+	getHealthStatus,
+	updateHealthStatus,
 	sendPartnerInvite,
 	getIncomingPartnerInvites,
 	acceptPartnerInvite,
@@ -43,6 +45,16 @@ router.put('/active-slot', protect, updateActiveSlot);
 // @desc    Set or update current user's username
 // @access  Private
 router.put('/username', protect, updateUsername);
+
+// @route   GET /api/users/health
+// @desc    Get health integration status (Apple Health / Health Connect)
+// @access  Private
+router.get('/health', protect, getHealthStatus);
+
+// @route   PUT /api/users/health
+// @desc    Update health integration status (link/unlink, autoImport, lastSyncAt)
+// @access  Private
+router.put('/health', protect, updateHealthStatus);
 
 // @route   POST /api/users/partner-invites
 // @desc    Send partner invite for a slot (p1/p2)

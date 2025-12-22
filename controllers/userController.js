@@ -170,6 +170,66 @@ const updateUsername = async (req, res) => {
   }
 };
 
+const getHealthStatus = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('health');
+    return res.json({
+      success: true,
+      data: {
+        health: user?.health || {},
+      },
+    });
+  } catch (error) {
+    console.error('❌ [getHealthStatus]:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const updateHealthStatus = async (req, res) => {
+  try {
+    const provider = req.body?.provider;
+    if (!['appleHealth', 'healthConnect'].includes(provider)) {
+      return res.status(400).json({ success: false, message: 'Provider invalide' });
+    }
+
+    const linked = req.body?.linked;
+    const autoImport = req.body?.autoImport;
+    const permissions = req.body?.permissions;
+    const lastSyncAt = req.body?.lastSyncAt;
+
+    const update = {};
+    if (typeof linked === 'boolean') update[`health.${provider}.linked`] = linked;
+    if (typeof autoImport === 'boolean') update[`health.${provider}.autoImport`] = autoImport;
+    if (Array.isArray(permissions)) update[`health.${provider}.permissions`] = permissions.map(String);
+    if (typeof lastSyncAt === 'string' || lastSyncAt instanceof Date) {
+      const parsed = new Date(lastSyncAt);
+      if (!Number.isNaN(parsed.getTime())) {
+        update[`health.${provider}.lastSyncAt`] = parsed;
+      }
+    }
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ success: false, message: 'Aucune donnée à mettre à jour' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: update },
+      { new: true, runValidators: true },
+    ).select('health');
+
+    return res.json({
+      success: true,
+      data: {
+        health: user?.health || {},
+      },
+    });
+  } catch (error) {
+    console.error('❌ [updateHealthStatus]:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 module.exports = {
   getUserProfile,
   getUsers,
@@ -177,6 +237,8 @@ module.exports = {
   updatePartnerLinks,
   updateActiveSlot,
   updateUsername,
+  getHealthStatus,
+  updateHealthStatus,
   sendPartnerInvite: async (req, res) => {
     try {
       const { partnerId, slot } = req.body;

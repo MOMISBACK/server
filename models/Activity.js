@@ -58,6 +58,16 @@ const activitySchema = new mongoose.Schema({
     enum: ['manual', 'tracked'],
   },
 
+  // Métadonnées import (Apple Health / Health Connect)
+  externalSource: {
+    type: String,
+    enum: ['appleHealth', 'healthConnect'],
+  },
+  externalId: {
+    type: String,
+    trim: true,
+  },
+
   // --- Champs spécifiques ---
   // Pour cycling, running, walking
   distance: {
@@ -89,6 +99,20 @@ const activitySchema = new mongoose.Schema({
   timestamps: true,
 });
 
+// Dé-dup best-effort pour les imports.
+// Important: un index unique + sparse n'empêche pas les collisions si les champs sont présents à null.
+// On applique donc un partial index uniquement quand les 2 champs sont renseignés.
+activitySchema.index(
+  { user: 1, externalSource: 1, externalId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      externalSource: { $type: 'string' },
+      externalId: { $type: 'string' },
+    },
+  },
+);
+
 const allowedFieldsByType = {
   running: ['distance', 'elevationGain', 'avgSpeed'],
   cycling: ['distance', 'elevationGain', 'avgSpeed'],
@@ -110,7 +134,7 @@ activitySchema.pre('validate', function () {
 
   const allAllowedFields = new Set([
     // Champs communs autorisés
-    'user', 'title', 'type', 'startTime', 'endTime', 'duration', 'date', 'source',
+    'user', 'title', 'type', 'startTime', 'endTime', 'duration', 'date', 'source', 'externalSource', 'externalId',
     // Champs ajoutés par Mongoose/MongoDB
     '_id', 'id', 'createdAt', 'updatedAt', '__v',
     // Champs spécifiques au type

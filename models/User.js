@@ -64,6 +64,22 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+
+  // ✅ Health integrations (Apple Health / Health Connect)
+  health: {
+    appleHealth: {
+      linked: { type: Boolean, default: false },
+      autoImport: { type: Boolean, default: false },
+      lastSyncAt: { type: Date },
+      permissions: [{ type: String }],
+    },
+    healthConnect: {
+      linked: { type: Boolean, default: false },
+      autoImport: { type: Boolean, default: false },
+      lastSyncAt: { type: Date },
+      permissions: [{ type: String }],
+    },
+  },
 }, {
   timestamps: true
 });

@@ -26,7 +26,7 @@ const validateActivityFields = (req, res, next) => {
 
   // ⭐ CORRECTION : Ajouter user, userId, notes
   const allowedFields = [
-    'type', 'title', 'duration', 'date', 'startTime', 'endTime', 'source',
+    'type', 'title', 'duration', 'date', 'startTime', 'endTime', 'source', 'externalSource', 'externalId',
     'user', 'userId', 'notes', // ⭐ AJOUTÉ
     ...ALLOWED_FIELDS[type]
   ];
@@ -89,6 +89,17 @@ const commonValidation = [
     .isLength({ max: 500 })
     .withMessage('Les notes ne doivent pas dépasser 500 caractères')
     .escape(),
+
+  body('externalSource')
+    .optional()
+    .isIn(['appleHealth', 'healthConnect'])
+    .withMessage('externalSource invalide'),
+
+  body('externalId')
+    .optional()
+    .isString()
+    .isLength({ min: 1, max: 200 })
+    .withMessage('externalId invalide'),
 ];
 
 /**

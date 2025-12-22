@@ -16,7 +16,25 @@ const getActivities = async (query) => {
  */
 const createActivity = async (activityData) => {
   const newActivity = new Activity(activityData);
-  return await newActivity.save();
+  try {
+    return await newActivity.save();
+  } catch (error) {
+    // Import de-dup: if the unique partial index triggers, return the existing activity.
+    if (
+      error?.code === 11000 &&
+      activityData?.user &&
+      activityData?.externalSource &&
+      activityData?.externalId
+    ) {
+      const existing = await Activity.findOne({
+        user: activityData.user,
+        externalSource: activityData.externalSource,
+        externalId: activityData.externalId,
+      });
+      if (existing) return existing;
+    }
+    throw error;
+  }
 };
 
 /**
