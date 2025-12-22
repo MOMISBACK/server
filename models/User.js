@@ -4,6 +4,16 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
+  // Pseudo affiché partout. Optionnel pour ne pas casser les comptes existants,
+  // mais requis à l'inscription via validation côté route/controller.
+  username: {
+    type: String,
+    lowercase: true,
+    trim: true,
+    minlength: [3, 'Pseudo trop court (min 3)'],
+    maxlength: [20, 'Pseudo trop long (max 20)'],
+    match: [/^[a-z0-9_]+$/i, 'Pseudo invalide (a-z, 0-9, _)'],
+  },
   email: {
     type: String,
     required: [true, 'Email requis'],
@@ -57,6 +67,9 @@ const userSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Unique, but sparse so existing users without username don't violate the index.
+userSchema.index({ username: 1 }, { unique: true, sparse: true });
 
 // Hash le mot de passe avant sauvegarde
 userSchema.pre('save', async function () {

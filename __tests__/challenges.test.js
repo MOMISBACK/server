@@ -349,6 +349,36 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(pendingSent.body.data).toBe(null);
   });
 
+  test('GET /api/challenges/pending-sent - returns pending DUO without slot, null with slot=solo', async () => {
+    const { user: partnerUser } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
+
+    const invite = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ mode: 'duo', partnerId, goal: { type: 'distance', value: 5 }, activityTypes: ['running'], title: 'InvitePendingSent', icon: 'bolt' });
+
+    expect(invite.status).toBe(201);
+    expect(invite.body.success).toBe(true);
+    expect(invite.body.data.status).toBe('pending');
+
+    const pendingNoSlot = await request(app)
+      .get('/api/challenges/pending-sent')
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(pendingNoSlot.status).toBe(200);
+    expect(pendingNoSlot.body.success).toBe(true);
+    expect(pendingNoSlot.body.data?._id).toBe(invite.body.data._id);
+
+    const pendingSolo = await request(app)
+      .get('/api/challenges/pending-sent?slot=solo')
+      .set('Authorization', `Bearer ${authToken}`);
+
+    expect(pendingSolo.status).toBe(200);
+    expect(pendingSolo.body.success).toBe(true);
+    expect(pendingSolo.body.data).toBe(null);
+  });
+
   test('POST /api/challenges/:id/refuse - Refuser une invitation', async () => {
     const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
     const partnerId = partnerUser._id.toString();

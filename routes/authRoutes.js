@@ -8,6 +8,7 @@ const { registerUser, loginUser } = require('../controllers/authController');
 // @access  Public
 router.post(
   '/register',
+  body('username').isLength({ min: 3, max: 20 }).matches(/^[a-z0-9_]+$/i).trim(),
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 6 }),
   registerUser

@@ -35,7 +35,7 @@ class ChallengeService {
         status: { $in: ['active', 'completed'] },
         endDate: { $gt: now }
       })
-        .populate('players.user', 'email totalDiamonds')
+        .populate('players.user', 'username email totalDiamonds')
         .sort({ createdAt: -1 });
     }
 
@@ -48,7 +48,7 @@ class ChallengeService {
         status: { $in: ['active', 'completed'] },
         endDate: { $gt: now }
       })
-        .populate('players.user', 'email totalDiamonds')
+        .populate('players.user', 'username email totalDiamonds')
         .sort({ createdAt: -1 });
     }
 
@@ -58,7 +58,7 @@ class ChallengeService {
       status: { $in: ['active', 'completed'] },
       endDate: { $gt: now }
     })
-      .populate('players.user', 'email totalDiamonds')
+      .populate('players.user', 'username email totalDiamonds')
       .sort({ createdAt: -1 });
   }
   
@@ -440,8 +440,8 @@ class ChallengeService {
       invitationStatus: 'pending',
       endDate: { $gt: new Date() }
     })
-    .populate('creator', 'email')
-    .populate('players.user', 'email')
+    .populate('creator', 'username email')
+    .populate('players.user', 'username email')
     .sort({ createdAt: -1 });
 
     console.log(`📬 ${invitations.length} invitation(s) trouvée(s) pour user ${userId}`);
@@ -470,8 +470,8 @@ class ChallengeService {
     }
 
     const challenge = await WeeklyChallenge.findOne(query)
-      .populate('creator', 'email')
-      .populate('players.user', 'email totalDiamonds')
+      .populate('creator', 'username email')
+      .populate('players.user', 'username email totalDiamonds')
       .sort({ createdAt: -1 });
 
     return challenge || null;
@@ -653,8 +653,8 @@ class ChallengeService {
     };
 
     const challenges = await WeeklyChallenge.find(query)
-      .populate('creator', 'email')
-      .populate('players.user', 'email totalDiamonds')
+      .populate('creator', 'username email')
+      .populate('players.user', 'username email totalDiamonds')
       .sort({ startDate: -1, createdAt: -1 });
 
     return Array.isArray(challenges) ? challenges : [];
@@ -669,8 +669,8 @@ class ChallengeService {
     };
 
     const challenges = await WeeklyChallenge.find(query)
-      .populate('creator', 'email')
-      .populate('players.user', 'email totalDiamonds')
+      .populate('creator', 'username email')
+      .populate('players.user', 'username email totalDiamonds')
       .sort({ startDate: -1, createdAt: -1 });
 
     return Array.isArray(challenges) ? challenges : [];

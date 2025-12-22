@@ -70,7 +70,7 @@ class ChallengeCron {
         const expiredChallenges = await WeeklyChallenge.find({
           status: { $in: ['active', 'pending'] },
           endDate: { $lt: now }
-        }).populate('players.user', 'email');
+        }).populate('players.user', 'username email');
 
         console.log(`📋 ${expiredChallenges.length} challenge(s) expiré(s) trouvé(s)`);
 
@@ -107,7 +107,7 @@ class ChallengeCron {
           status: 'active',
           bonusEarned: true,
           bonusAwarded: false
-        }).populate('players.user', 'email totalDiamonds');
+        }).populate('players.user', 'username email totalDiamonds');
 
         console.log(`🎁 ${duoChallenges.length} bonus potentiel(s) à vérifier`);
 

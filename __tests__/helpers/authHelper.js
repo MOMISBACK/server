@@ -2,8 +2,10 @@ const jwt = require('jsonwebtoken');
 const User = require('../../models/User');
 
 async function createTestUserWithToken() {
+  const suffix = Date.now().toString(36).slice(-8);
+  const username = `tu_${suffix}`; // <= 20 chars, lowercase, unique enough for tests
   const user = await User.create({
-    username: `testuser_${Date.now()}`,
+    username,
     email: `test_${Date.now()}@example.com`,
     password: 'Password123!',
   });

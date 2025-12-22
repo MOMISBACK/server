@@ -46,7 +46,7 @@ const getCurrentDuoChallengeActivities = asyncHandler(async (req, res) => {
     'players.user': userId,
     endDate: { $gt: new Date() },
   })
-    .populate('players.user', 'email')
+    .populate('players.user', 'username email')
     .sort({ createdAt: -1 });
 
   if (!challenge) {
@@ -69,7 +69,7 @@ const getCurrentDuoChallengeActivities = asyncHandler(async (req, res) => {
     createdAt: { $gte: startDateNormalized > challenge.createdAt ? startDateNormalized : challenge.createdAt },
     type: { $in: challenge.activityTypes },
   })
-    .populate('user', 'email')
+    .populate('user', 'username email')
     .sort({ date: -1, startTime: -1, createdAt: -1 });
 
   res.status(200).json(activities);
@@ -103,7 +103,7 @@ const getSharedActivitiesWithPartner = asyncHandler(async (req, res) => {
   const activities = await Activity.find({
     user: { $in: [userId, partnerId] },
   })
-    .populate('user', 'email')
+    .populate('user', 'username email')
     .sort({ date: -1, startTime: -1, createdAt: -1 });
 
   res.status(200).json(activities);

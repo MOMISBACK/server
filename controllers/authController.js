@@ -24,7 +24,7 @@ const registerUser = async (req, res) => {
     });
   }
 
-  const { email, password } = req.body;
+  const { email, password, username } = req.body;
 
   try {
     const userExists = await userService.findUserByEmail(email);
@@ -32,11 +32,17 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const user = await userService.createUser(email, password);
+    const usernameExists = await userService.findUserByUsername(username);
+    if (usernameExists) {
+      return res.status(400).json({ message: 'Username already taken' });
+    }
+
+    const user = await userService.createUser(email, password, username);
 
     if (user) {
       res.status(201).json({
         _id: user._id,
+        username: user.username,
         email: user.email,
         token: generateToken(user._id),
       });
@@ -49,6 +55,10 @@ const registerUser = async (req, res) => {
 
     // Duplication d'email (index unique)
     if (error?.code === 11000) {
+      const key = Object.keys(error?.keyPattern || error?.keyValue || {})[0];
+      if (key === 'username') {
+        return res.status(400).json({ message: 'Username already taken' });
+      }
       return res.status(400).json({ message: 'User already exists' });
     }
 
@@ -91,6 +101,7 @@ const loginUser = async (req, res) => {
     if (user && (await user.matchPassword(password))) {
       res.json({
         _id: user._id,
+        username: user.username,
         email: user.email,
         token: generateToken(user._id),
       });

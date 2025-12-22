@@ -1,4 +1,5 @@
 const userService = require('../services/userService');
+const User = require('../models/User');
 
 const normalizePartnerLinks = (partnerLinks) => {
   const links = Array.isArray(partnerLinks) ? partnerLinks : [];
@@ -12,6 +13,7 @@ const normalizePartnerLinks = (partnerLinks) => {
         ? {
             partner: {
               _id: partnerDoc._id.toString(),
+              username: partnerDoc.username,
               email: partnerDoc.email,
               totalDiamonds: partnerDoc.totalDiamonds,
             },
@@ -126,12 +128,55 @@ const updateActiveSlot = async (req, res) => {
   }
 };
 
+/**
+ * Set or update the current user's username.
+ * Body: { username: string }
+ */
+const updateUsername = async (req, res) => {
+  try {
+    const raw = req.body?.username;
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return res.status(400).json({ success: false, message: 'Pseudo requis' });
+    }
+
+    const username = raw.trim().toLowerCase();
+
+    if (username.length < 3 || username.length > 20 || !/^[a-z0-9_]+$/.test(username)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pseudo invalide (3-20 caractères, lettres/chiffres/_)',
+      });
+    }
+
+    const existing = await User.findOne({ username, _id: { $ne: req.user.id } }).select('_id');
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Username already taken' });
+    }
+
+    const updated = await User.findByIdAndUpdate(
+      req.user.id,
+      { username },
+      { new: true, runValidators: true },
+    ).select('-password');
+
+    return res.json({ success: true, data: { user: updated } });
+  } catch (error) {
+    // Duplication username (index unique)
+    if (error?.code === 11000) {
+      return res.status(400).json({ success: false, message: 'Username already taken' });
+    }
+    console.error('❌ [updateUsername]:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 module.exports = {
   getUserProfile,
   getUsers,
   getPartnerLinks,
   updatePartnerLinks,
   updateActiveSlot,
+  updateUsername,
   sendPartnerInvite: async (req, res) => {
     try {
       const { partnerId, slot } = req.body;

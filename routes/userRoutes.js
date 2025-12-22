@@ -7,6 +7,7 @@ const {
 	getPartnerLinks,
 	updatePartnerLinks,
 	updateActiveSlot,
+	updateUsername,
 	sendPartnerInvite,
 	getIncomingPartnerInvites,
 	acceptPartnerInvite,
@@ -37,6 +38,11 @@ router.put('/partner-links', protect, updatePartnerLinks);
 // @desc    Update active slot (p1, p2, solo)
 // @access  Private
 router.put('/active-slot', protect, updateActiveSlot);
+
+// @route   PUT /api/users/username
+// @desc    Set or update current user's username
+// @access  Private
+router.put('/username', protect, updateUsername);
 
 // @route   POST /api/users/partner-invites
 // @desc    Send partner invite for a slot (p1/p2)

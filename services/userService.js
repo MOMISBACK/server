@@ -7,8 +7,8 @@ const PartnerInvite = require('../models/PartnerInvite');
  * @param {string} password - The user's password.
  * @returns {Promise<User>} The created user object.
  */
-const createUser = async (email, password) => {
-  return await User.create({ email, password });
+const createUser = async (email, password, username) => {
+  return await User.create({ email, password, username });
 };
 
 /**
@@ -18,6 +18,16 @@ const createUser = async (email, password) => {
  */
 const findUserByEmail = async (email) => {
   return await User.findOne({ email });
+};
+
+/**
+ * Finds a user by their username (pseudo).
+ * @param {string} username - The user's username.
+ * @returns {Promise<User|null>}
+ */
+const findUserByUsername = async (username) => {
+  if (!username) return null;
+  return await User.findOne({ username: username.toLowerCase().trim() });
 };
 
 /**
@@ -43,7 +53,7 @@ const getAllUsers = async () => {
 const getUserWithPartnerLinks = async (userId) => {
   return await User.findById(userId)
     .select('-password')
-    .populate('partnerLinks.partnerId', 'email totalDiamonds');
+    .populate('partnerLinks.partnerId', 'username email totalDiamonds');
 };
 
 /**
@@ -88,7 +98,7 @@ const updateUserPartnerLinks = async (userId, data) => {
     { new: true }
   )
     .select('-password')
-    .populate('partnerLinks.partnerId', 'email totalDiamonds');
+    .populate('partnerLinks.partnerId', 'username email totalDiamonds');
 
   // Also remove any reciprocal links left on the removed partners.
   // Otherwise, user A can clear B, but B still has a confirmed/pending link to A,
@@ -129,7 +139,7 @@ const updateUserActiveSlot = async (userId, activeSlot) => {
     { new: true }
   )
     .select('-password')
-    .populate('partnerLinks.partnerId', 'email totalDiamonds');
+    .populate('partnerLinks.partnerId', 'username email totalDiamonds');
 
   return user;
 };
@@ -246,7 +256,7 @@ const sendPartnerInvite = async ({ fromUserId, toUserId, slot }) => {
 
 const getIncomingPartnerInvites = async ({ userId }) => {
   const invites = await PartnerInvite.find({ toUser: userId, status: 'pending' })
-    .populate('fromUser', 'email totalDiamonds')
+    .populate('fromUser', 'username email totalDiamonds')
     .sort({ createdAt: -1 });
 
   return invites;
@@ -366,6 +376,7 @@ const refusePartnerInvite = async ({ inviteId, userId }) => {
 module.exports = {
   createUser,
   findUserByEmail,
+  findUserByUsername,
   getUserById,
   getAllUsers,
   getUserWithPartnerLinks,
