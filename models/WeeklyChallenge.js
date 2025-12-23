@@ -93,14 +93,19 @@ const weeklyChallengeSchema = new mongoose.Schema({
   
   startDate: {
     type: Date,
-    required: true
+    required: function() {
+      return ['active', 'completed', 'failed'].includes(this.status);
+    }
   },
   
   endDate: {
     type: Date,
-    required: true,
+    required: function() {
+      return ['active', 'completed', 'failed'].includes(this.status);
+    },
     validate: {
       validator: function(v) {
+        if (!v || !this.startDate) return true;
         return v > this.startDate;
       },
       message: 'La date de fin doit être après la date de début'

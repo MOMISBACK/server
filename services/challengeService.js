@@ -7,6 +7,11 @@ const User = require('../models/User');
 
 class ChallengeService {
 
+  _log(...args) {
+    if (process.env.NODE_ENV === 'test') return;
+    console.log(...args);
+  }
+
   async _getConfirmedPartnerIdForSlot(userId, slot) {
     if (slot !== 'p1' && slot !== 'p2') return null;
     const user = await User.findById(userId).select('partnerLinks');
@@ -91,7 +96,8 @@ class ChallengeService {
       throw new Error('Vous avez déjà un challenge actif');
     }
 
-    const { startDate, endDate } = this._calculateWeekDates();
+    // ✅ CHANGÉ: Utiliser 7 jours à partir de maintenant (pas la semaine calendaire)
+    const { startDate, endDate } = this._calculate7DayChallengeDates();
 
     const challenge = new WeeklyChallenge({
       mode: 'solo',
@@ -113,7 +119,7 @@ class ChallengeService {
     });
 
     await challenge.save();
-    console.log('✅ Challenge SOLO créé:', challenge._id);
+    this._log('✅ Challenge SOLO créé (7 jours):', challenge._id);
     return challenge;
   }
 
@@ -163,7 +169,6 @@ class ChallengeService {
       'players.user': { $all: [creatorId, partnerId] },
       status: 'pending',
       invitationStatus: 'pending',
-      endDate: { $gt: new Date() }
     });
 
     if (existingPending) {
@@ -186,16 +191,18 @@ class ChallengeService {
     const partnerActiveChallenge = await WeeklyChallenge.findOne({
       mode: 'duo',
       'players.user': { $all: [creatorId, partnerId] },
-      status: { $in: ['active', 'pending'] },
-      endDate: { $gt: new Date() }
+      $or: [
+        { status: 'pending', invitationStatus: 'pending' },
+        { status: 'active', endDate: { $gt: new Date() } },
+      ],
     });
 
     if (partnerActiveChallenge) {
       throw new Error('Ce partenaire a déjà un challenge en cours ou une invitation en attente');
     }
 
-    const { startDate, endDate } = this._calculateWeekDates();
-
+    // ✅ CHANGÉ: Ne pas setter les dates à la création (pending)
+    // Les dates seront settées quand le challenge sera accepté
     const challenge = new WeeklyChallenge({
       mode: 'duo',
       creator: creatorId,
@@ -207,14 +214,14 @@ class ChallengeService {
       activityTypes,
       title: title || 'Challenge DUO',
       icon: icon || 'people-outline',
-      startDate,
-      endDate,
+      startDate: null,
+      endDate: null,
       status: 'pending',
       invitationStatus: 'pending'
     });
 
     await challenge.save();
-    console.log('✅ Challenge DUO créé (invitation envoyée):', {
+    this._log('✅ Challenge DUO créé (invitation en attente):', {
       id: challenge._id,
       creator: creatorId,
       partner: partnerId
@@ -229,7 +236,7 @@ class ChallengeService {
     session.startTransaction();
     
     try {
-      console.log('🔄 Acceptation invitation:', { userId, challengeId });
+      this._log('🔄 Acceptation invitation:', { userId, challengeId });
 
       const challenge = await WeeklyChallenge.findById(challengeId).session(session);
       
@@ -258,8 +265,10 @@ class ChallengeService {
       const userActiveChallenge = await WeeklyChallenge.findOne({
         mode: 'duo',
         'players.user': { $all: [userId, challenge.creator] },
-        status: { $in: ['active', 'pending'] },
-        endDate: { $gt: new Date() },
+        $or: [
+          { status: 'pending', invitationStatus: 'pending' },
+          { status: 'active', endDate: { $gt: new Date() } },
+        ],
         _id: { $ne: challengeId }
       }).session(session);
 
@@ -267,18 +276,24 @@ class ChallengeService {
         throw new Error('Vous avez déjà un challenge en cours');
       }
 
+      // ✅ CHANGÉ: Setter les dates quand le challenge est accepté (7 jours à partir de maintenant)
+      const { startDate, endDate } = this._calculate7DayChallengeDates();
+      challenge.startDate = startDate;
+      challenge.endDate = endDate;
       challenge.status = 'active';
       challenge.invitationStatus = 'accepted';
       await challenge.save({ session });
 
       await session.commitTransaction();
       
-      console.log('✅ Invitation acceptée avec succès:', challengeId);
+      this._log('✅ Invitation acceptée avec succès (7 jours):', challengeId);
       return challenge;
 
     } catch (error) {
       await session.abortTransaction();
-      console.error('❌ Erreur acceptation invitation:', error.message);
+      if (process.env.NODE_ENV !== 'test') {
+        console.error('❌ Erreur acceptation invitation:', error.message);
+      }
       throw error;
       
     } finally {
@@ -315,24 +330,24 @@ class ChallengeService {
     challenge.invitationStatus = 'refused';
     await challenge.save();
 
-    console.log('❌ Invitation refusée:', challengeId);
+    this._log('❌ Invitation refusée:', challengeId);
     return challenge;
   }
 
   // ⭐ CORRIGÉ : Calculer la progression d'un challenge
   async calculateProgress(userId, options = {}) {
-    console.log('🔍 calculateProgress appelé pour user:', userId);
+    this._log('🔍 calculateProgress appelé pour user:', userId);
 
     // Slot-aware: when slot is provided, only compute that slot's challenge.
     // Pending invitations are handled via /invitations and are not returned here.
     const challenge = await this._findCurrentChallengeDoc(userId, options);
 
     if (!challenge) {
-      console.log('❌ Aucun challenge trouvé pour calculateProgress');
+      this._log('❌ Aucun challenge trouvé pour calculateProgress');
       return null;
     }
 
-    console.log('📊 Calcul progression challenge:', {
+    this._log('📊 Calcul progression challenge:', {
       id: challenge._id,
       mode: challenge.mode,
       status: challenge.status,
@@ -366,7 +381,7 @@ class ChallengeService {
 
       const activities = await Activity.find(activityQuery);
 
-      console.log(`📋 Activités trouvées pour ${playerId}:`, {
+      this._log(`📋 Activités trouvées pour ${playerId}:`, {
         count: activities.length,
         startDate: startDateNormalized.toISOString(),
         endDate: endDateNormalized.toISOString(),
@@ -408,7 +423,7 @@ class ChallengeService {
 
     if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
       if (challenge.checkBonus()) {
-        console.log('🎉 Conditions bonus remplies !');
+        this._log('🎉 Conditions bonus remplies !');
         await challenge.awardBonus();
       }
     }
@@ -419,15 +434,15 @@ class ChallengeService {
 
   // ⭐ CORRIGÉ : Récupérer le challenge actif d'un utilisateur
   async getCurrentChallenge(userId) {
-    console.log('🔍 getCurrentChallenge appelé pour user:', userId);
+    this._log('🔍 getCurrentChallenge appelé pour user:', userId);
     // Backward-compatible: return latest computed challenge
     const challenge = await this.calculateProgress(userId);
     if (challenge) {
-      console.log(`✅ Challenge trouvé: ${challenge._id}`);
+      this._log(`✅ Challenge trouvé: ${challenge._id}`);
       return challenge;
     }
 
-    console.log('❌ Aucun challenge trouvé pour cet utilisateur');
+    this._log('❌ Aucun challenge trouvé pour cet utilisateur');
     return null;
   }
 
@@ -437,28 +452,25 @@ class ChallengeService {
       'players.user': userId,
       creator: { $ne: userId },
       status: 'pending',
-      invitationStatus: 'pending',
-      endDate: { $gt: new Date() }
+      invitationStatus: 'pending'
     })
     .populate('creator', 'username email')
     .populate('players.user', 'username email')
     .sort({ createdAt: -1 });
 
-    console.log(`📬 ${invitations.length} invitation(s) trouvée(s) pour user ${userId}`);
+    this._log(`📬 ${invitations.length} invitation(s) trouvée(s) pour user ${userId}`);
     return invitations;
   }
 
   // ⭐ Récupérer l'invitation envoyée (pending) par le créateur
   async getPendingSentChallenge(userId, options = {}) {
     const slot = options?.slot;
-    const now = new Date();
 
     let query = {
       creator: userId,
       mode: 'duo',
       status: 'pending',
       invitationStatus: 'pending',
-      endDate: { $gt: now },
     };
 
     if (slot === 'p1' || slot === 'p2') {
@@ -484,8 +496,10 @@ class ChallengeService {
 
     let query = {
       creator: userId,
-      status: { $in: ['active', 'pending'] },
-      endDate: { $gt: now }
+      $or: [
+        { status: 'pending', invitationStatus: 'pending' },
+        { status: 'active', endDate: { $gt: now } },
+      ],
     };
 
     if (slot === 'solo') {
@@ -522,7 +536,7 @@ class ChallengeService {
     });
 
     await challenge.save();
-    console.log('✅ Challenge mis à jour:', challenge._id);
+    this._log('✅ Challenge mis à jour:', challenge._id);
     
     return await this.calculateProgress(userId, options);
   }
@@ -534,8 +548,11 @@ class ChallengeService {
 
     let query = {
       'players.user': userId,
-      status: { $in: ['active', 'pending', 'completed'] },
-      endDate: { $gt: now }
+      $or: [
+        { status: 'pending', invitationStatus: 'pending' },
+        { status: 'active', endDate: { $gt: now } },
+        { status: 'completed', endDate: { $gt: now } },
+      ],
     };
 
     if (slot === 'solo') {
@@ -552,20 +569,20 @@ class ChallengeService {
       throw new Error('Aucun challenge actif');
     }
 
-    console.log('🗑️ Suppression challenge:', {
+    this._log('🗑️ Suppression challenge:', {
       id: challenge._id,
       mode: challenge.mode,
       status: challenge.status
     });
 
     if (challenge.status !== 'completed') {
-      console.log('💎 Finalisation avant suppression...');
+      this._log('💎 Finalisation avant suppression...');
       await this.finalizeChallenge(challenge._id);
     }
 
     await WeeklyChallenge.findByIdAndDelete(challenge._id);
 
-    console.log('✅ Challenge quitté et supprimé');
+    this._log('✅ Challenge quitté et supprimé');
     return { success: true, message: 'Challenge supprimé avec succès' };
   }
 
@@ -578,11 +595,11 @@ class ChallengeService {
     }
     
     if (challenge.status === 'completed' && challenge.bonusAwarded) {
-      console.log('⚠️ Challenge déjà finalisé et bonus attribué');
+      this._log('⚠️ Challenge déjà finalisé et bonus attribué');
       return challenge;
     }
     
-    console.log('🏁 Clôture du challenge:', challengeId);
+    this._log('🏁 Clôture du challenge:', challengeId);
     
     for (const player of challenge.players) {
       const playerId = typeof player.user === 'string' ? player.user : player.user._id;
@@ -595,14 +612,14 @@ class ChallengeService {
         );
         
         if (result) {
-          console.log(`💎 +${player.diamonds} diamants → ${playerId} (Total: ${result.totalDiamonds})`);
+          this._log(`💎 +${player.diamonds} diamants → ${playerId} (Total: ${result.totalDiamonds})`);
         }
       }
     }
     
     if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
       if (challenge.checkBonus()) {
-        console.log('🎁 Attribution du BONUS DUO (doublement)...');
+        this._log('🎁 Attribution du BONUS DUO (doublement)...');
         
         for (const player of challenge.players) {
           const playerId = typeof player.user === 'string' ? player.user : player.user._id;
@@ -614,7 +631,7 @@ class ChallengeService {
           );
           
           if (result) {
-            console.log(`🎁 BONUS +${player.diamonds} diamants → ${playerId} (Total: ${result.totalDiamonds})`);
+            this._log(`🎁 BONUS +${player.diamonds} diamants → ${playerId} (Total: ${result.totalDiamonds})`);
           }
         }
         
@@ -626,7 +643,7 @@ class ChallengeService {
     challenge.status = 'completed';
     await challenge.save();
     
-    console.log(`✅ Challenge ${challenge._id} finalisé`);
+    this._log(`✅ Challenge ${challenge._id} finalisé`);
     return challenge;
   }
 
@@ -677,6 +694,27 @@ class ChallengeService {
   }
 
   // ⭐ Helper : calculer les dates de la semaine
+  // ✅ NOUVEAU: Calculer 7 jours exactement à partir de maintenant
+  // Utilisé quand un challenge est créé (SOLO) ou accepté (DUO)
+  _calculate7DayChallengeDates() {
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setHours(0, 0, 0, 0);
+    
+    // Le challenge se termine exactement 7 jours plus tard à 23:59:59.999
+    const endDate = new Date(now);
+    endDate.setDate(now.getDate() + 7);
+    endDate.setHours(23, 59, 59, 999);
+
+    this._log('📅 [_calculate7DayChallengeDates] Challenge 7 jours:', {
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
+      durationDays: 7
+    });
+
+    return { startDate, endDate };
+  }
+
   _calculateWeekDates() {
     const now = new Date();
     const dayOfWeek = now.getDay();
@@ -700,7 +738,7 @@ class ChallengeService {
     endDate.setDate(now.getDate() + daysUntilSunday);
     endDate.setHours(23, 59, 59, 999);
 
-    console.log('📅 [_calculateWeekDates] Période:', {
+    this._log('📅 [_calculateWeekDates] Période:', {
       start: startDate.toISOString(),
       end: endDate.toISOString(),
       startDay: ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'][startDate.getDay()],
