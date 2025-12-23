@@ -8,6 +8,7 @@ async function createTestUserWithToken() {
     username,
     email: `test_${Date.now()}@example.com`,
     password: 'Password123!',
+    totalDiamonds: 200,
   });
 
   const token = jwt.sign(

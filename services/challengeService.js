@@ -12,6 +12,29 @@ class ChallengeService {
     console.log(...args);
   }
 
+  async _chargeDiamondsOrThrow(userId, amount, session) {
+    if (!amount || amount <= 0) return;
+
+    const res = await User.updateOne(
+      { _id: userId, totalDiamonds: { $gte: amount } },
+      { $inc: { totalDiamonds: -amount } },
+      session ? { session } : undefined
+    );
+
+    if (!res || res.modifiedCount !== 1) {
+      throw new Error('Diamants insuffisants');
+    }
+  }
+
+  async _refundDiamondsBestEffort(userId, amount) {
+    if (!amount || amount <= 0) return;
+    try {
+      await User.updateOne({ _id: userId }, { $inc: { totalDiamonds: amount } });
+    } catch (_) {
+      // Best-effort refund: do not mask the original error
+    }
+  }
+
   async _getConfirmedPartnerIdForSlot(userId, slot) {
     if (slot !== 'p1' && slot !== 'p2') return null;
     const user = await User.findById(userId).select('partnerLinks');
@@ -96,31 +119,44 @@ class ChallengeService {
       throw new Error('Vous avez déjà un challenge actif');
     }
 
-    // ✅ CHANGÉ: Utiliser 7 jours à partir de maintenant (pas la semaine calendaire)
-    const { startDate, endDate } = this._calculate7DayChallengeDates();
+    let charged = false;
+    try {
+      // 1 diamant pour lancer un pacte SOLO
+      await this._chargeDiamondsOrThrow(userId, 1);
+      charged = true;
 
-    const challenge = new WeeklyChallenge({
-      mode: 'solo',
-      creator: userId,
-      players: [{
-        user: userId,
-        progress: 0,
-        diamonds: 0,
-        completed: false
-      }],
-      goal,
-      activityTypes,
-      title: title || 'Challenge SOLO',
-      icon: icon || 'trophy-outline',
-      startDate,
-      endDate,
-      status: 'active',
-      user: userId // Rétro-compatibilité
-    });
+      // ✅ CHANGÉ: Utiliser 7 jours à partir de maintenant (pas la semaine calendaire)
+      const { startDate, endDate } = this._calculate7DayChallengeDates();
 
-    await challenge.save();
-    this._log('✅ Challenge SOLO créé (7 jours):', challenge._id);
-    return challenge;
+      const challenge = new WeeklyChallenge({
+        mode: 'solo',
+        creator: userId,
+        players: [{
+          user: userId,
+          progress: 0,
+          diamonds: 0,
+          completed: false
+        }],
+        goal,
+        activityTypes,
+        title: title || 'Challenge SOLO',
+        icon: icon || 'trophy-outline',
+        startDate,
+        endDate,
+        status: 'active',
+        user: userId // Rétro-compatibilité
+      });
+
+      await challenge.save();
+
+      this._log('✅ Challenge SOLO créé (7 jours):', challenge._id);
+      return challenge;
+    } catch (error) {
+      if (charged) {
+        await this._refundDiamondsBestEffort(userId, 1);
+      }
+      throw error;
+    }
   }
 
   // ⭐ Créer un challenge DUO (avec invitation)
@@ -201,44 +237,55 @@ class ChallengeService {
       throw new Error('Ce partenaire a déjà un challenge en cours ou une invitation en attente');
     }
 
-    // ✅ CHANGÉ: Ne pas setter les dates à la création (pending)
-    // Les dates seront settées quand le challenge sera accepté
-    const challenge = new WeeklyChallenge({
-      mode: 'duo',
-      creator: creatorId,
-      players: [
-        { user: creatorId, progress: 0, diamonds: 0, completed: false },
-        { user: partnerId, progress: 0, diamonds: 0, completed: false }
-      ],
-      goal,
-      activityTypes,
-      title: title || 'Challenge DUO',
-      icon: icon || 'people-outline',
-      startDate: null,
-      endDate: null,
-      status: 'pending',
-      invitationStatus: 'pending'
-    });
+    let charged = false;
+    try {
+      // 1 diamant pour le créateur au lancement d'un pacte DUO (invitation)
+      await this._chargeDiamondsOrThrow(creatorId, 1);
+      charged = true;
 
-    await challenge.save();
-    this._log('✅ Challenge DUO créé (invitation en attente):', {
-      id: challenge._id,
-      creator: creatorId,
-      partner: partnerId
-    });
-    
-    return challenge;
+      // ✅ CHANGÉ: Ne pas setter les dates à la création (pending)
+      // Les dates seront settées quand le challenge sera accepté
+      const challenge = new WeeklyChallenge({
+        mode: 'duo',
+        creator: creatorId,
+        players: [
+          { user: creatorId, progress: 0, diamonds: 0, completed: false },
+          { user: partnerId, progress: 0, diamonds: 0, completed: false }
+        ],
+        goal,
+        activityTypes,
+        title: title || 'Challenge DUO',
+        icon: icon || 'people-outline',
+        startDate: null,
+        endDate: null,
+        status: 'pending',
+        invitationStatus: 'pending'
+      });
+
+      await challenge.save();
+
+      this._log('✅ Challenge DUO créé (invitation en attente):', {
+        id: challenge._id,
+        creator: creatorId,
+        partner: partnerId
+      });
+
+      return challenge;
+    } catch (error) {
+      if (charged) {
+        await this._refundDiamondsBestEffort(creatorId, 1);
+      }
+      throw error;
+    }
   }
 
-  // ⭐ Accepter une invitation DUO (avec transaction)
+  // ⭐ Accepter une invitation DUO
   async acceptInvitation(userId, challengeId) {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
+    let charged = false;
     try {
       this._log('🔄 Acceptation invitation:', { userId, challengeId });
 
-      const challenge = await WeeklyChallenge.findById(challengeId).session(session);
+      const challenge = await WeeklyChallenge.findById(challengeId);
       
       if (!challenge) {
         throw new Error('Challenge introuvable');
@@ -270,34 +317,58 @@ class ChallengeService {
           { status: 'active', endDate: { $gt: new Date() } },
         ],
         _id: { $ne: challengeId }
-      }).session(session);
+      });
 
       if (userActiveChallenge) {
         throw new Error('Vous avez déjà un challenge en cours');
       }
 
+      // 1 diamant pour l'invité au moment d'accepter un pacte DUO
+      await this._chargeDiamondsOrThrow(userId, 1);
+      charged = true;
+
       // ✅ CHANGÉ: Setter les dates quand le challenge est accepté (7 jours à partir de maintenant)
       const { startDate, endDate } = this._calculate7DayChallengeDates();
-      challenge.startDate = startDate;
-      challenge.endDate = endDate;
-      challenge.status = 'active';
-      challenge.invitationStatus = 'accepted';
-      await challenge.save({ session });
 
-      await session.commitTransaction();
+      const res = await WeeklyChallenge.updateOne(
+        {
+          _id: challengeId,
+          mode: 'duo',
+          status: 'pending',
+          invitationStatus: 'pending',
+          creator: challenge.creator,
+          'players.user': { $all: [userId, challenge.creator] },
+        },
+        {
+          $set: {
+            startDate,
+            endDate,
+            status: 'active',
+            invitationStatus: 'accepted',
+          },
+        }
+      );
+
+      if (!res || res.modifiedCount !== 1) {
+        throw new Error('Cette invitation n\'est plus disponible');
+      }
+
+      const updated = await WeeklyChallenge.findById(challengeId);
+      if (!updated) {
+        throw new Error('Challenge introuvable');
+      }
       
       this._log('✅ Invitation acceptée avec succès (7 jours):', challengeId);
-      return challenge;
+      return updated;
 
     } catch (error) {
-      await session.abortTransaction();
+      if (charged) {
+        await this._refundDiamondsBestEffort(userId, 1);
+      }
       if (process.env.NODE_ENV !== 'test') {
         console.error('❌ Erreur acceptation invitation:', error.message);
       }
       throw error;
-      
-    } finally {
-      session.endSession();
     }
   }
 

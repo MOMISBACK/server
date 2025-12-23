@@ -23,6 +23,8 @@ afterAll(async () => {
 
 describe('🎯 Challenges API - Multi-objectifs', () => {
   test('POST /api/challenges - Créer avec 1 objectif', async () => {
+    const before = await User.findById(userId).select('totalDiamonds');
+
     const res = await request(app)
       .post('/api/challenges')
       .set('Authorization', `Bearer ${authToken}`)
@@ -39,6 +41,27 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
     expect(res.body.data.goal.type).toBe('distance');
     expect(res.body.data.goal.value).toBe(10);
     expect(res.body.data.progress.goal).toBe(10);
+
+    const after = await User.findById(userId).select('totalDiamonds');
+    expect(after.totalDiamonds).toBe((before?.totalDiamonds ?? 200) - 1);
+  });
+
+  test('❌ POST /api/challenges - Rejeter si diamants insuffisants (SOLO)', async () => {
+    await User.updateOne({ _id: userId }, { $set: { totalDiamonds: 0 } });
+
+    const res = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        goal: { type: 'distance', value: 10 },
+        activityTypes: ['running'],
+        title: 'No money',
+        icon: 'trophy-outline'
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/Diamants insuffisants/i);
   });
 
   test('POST /api/challenges - Rejeter multi-objectifs (non supporté)', async () => {
@@ -235,6 +258,8 @@ describe('🎯 Duo / Invitations flows', () => {
     const { user: partnerUser } = await createTestUserWithToken();
     const partnerId = partnerUser._id.toString();
 
+    const creatorBefore = await User.findById(userId).select('totalDiamonds');
+
     // Créer l'invitation en mode duo
     const createRes = await request(app)
       .post('/api/challenges')
@@ -253,6 +278,9 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(createRes.body.data.mode).toBe('duo');
     expect(createRes.body.data.status).toBe('pending');
     expect(createRes.body.data.invitationStatus).toBe('pending');
+
+    const creatorAfter = await User.findById(userId).select('totalDiamonds');
+    expect(creatorAfter.totalDiamonds).toBe((creatorBefore?.totalDiamonds ?? 200) - 1);
   });
 
   test('POST /api/challenges (duo) - Empêcher invitations pendantes dupliquées', async () => {
@@ -282,6 +310,8 @@ describe('🎯 Duo / Invitations flows', () => {
     const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
     const partnerId = partnerUser._id.toString();
 
+    const inviteeBefore = await User.findById(partnerId).select('totalDiamonds');
+
     const invite = await request(app)
       .post('/api/challenges')
       .set('Authorization', `Bearer ${authToken}`)
@@ -299,6 +329,37 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe('active');
     expect(res.body.data.invitationStatus).toBe('accepted');
+
+    const inviteeAfter = await User.findById(partnerId).select('totalDiamonds');
+    expect(inviteeAfter.totalDiamonds).toBe((inviteeBefore?.totalDiamonds ?? 200) - 1);
+  });
+
+  test('❌ POST /api/challenges/:id/accept - Rejeter si diamants insuffisants (invitee DUO)', async () => {
+    const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
+    const partnerId = partnerUser._id.toString();
+
+    const invite = await request(app)
+      .post('/api/challenges')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ mode: 'duo', partnerId, goal: { type: 'distance', value: 5 }, activityTypes: ['running'], title: 'InviteNoMoney', icon: 'bolt' });
+
+    expect(invite.status).toBe(201);
+    const challengeId = invite.body.data._id;
+
+    await User.updateOne({ _id: partnerId }, { $set: { totalDiamonds: 0 } });
+
+    const res = await request(app)
+      .post(`/api/challenges/${challengeId}/accept`)
+      .set('Authorization', `Bearer ${partnerToken}`)
+      .send();
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/Diamants insuffisants/i);
+
+    const challenge = await WeeklyChallenge.findById(challengeId).select('status invitationStatus');
+    expect(challenge.status).toBe('pending');
+    expect(challenge.invitationStatus).toBe('pending');
   });
 
   test('✅ after accept: creator and invitee both see active current challenge', async () => {

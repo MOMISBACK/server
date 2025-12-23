@@ -18,6 +18,10 @@ describe('👤 Username (pseudo) flows', () => {
       expect(res.body).toHaveProperty('token');
       expect(res.body).toHaveProperty('email');
       expect(res.body.username).toBe('john_doe');
+
+      const created = await User.findOne({ email: res.body.email });
+      expect(created).toBeTruthy();
+      expect(created.totalDiamonds).toBe(200);
     });
 
     test('❌ rejects missing username', async () => {

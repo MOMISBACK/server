@@ -8,7 +8,7 @@ const PartnerInvite = require('../models/PartnerInvite');
  * @returns {Promise<User>} The created user object.
  */
 const createUser = async (email, password, username) => {
-  return await User.create({ email, password, username });
+  return await User.create({ email, password, username, totalDiamonds: 200 });
 };
 
 /**
