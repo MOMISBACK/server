@@ -205,66 +205,10 @@ class ChallengeCron {
 
   // ⭐ AMÉLIORÉ : Helper : finaliser un challenge
   async _finalizeChallenge(challenge) {
-    console.log(`🏁 Finalisation challenge ${challenge._id} (mode: ${challenge.mode})...`);
-    
-    let totalDiamondsAwarded = 0;
-    
-    // Attribuer les diamants normaux
-    for (const player of challenge.players) {
-      const playerId = typeof player.user === 'string' ? player.user : player.user._id;
-      
-      if (player.diamonds > 0) {
-        const result = await User.findByIdAndUpdate(
-          playerId,
-          { $inc: { totalDiamonds: player.diamonds } },
-          { new: true }
-        );
-        
-        if (result) {
-          console.log(`💎 +${player.diamonds} diamants → ${playerId} (Total: ${result.totalDiamonds})`);
-          totalDiamondsAwarded += player.diamonds;
-        }
-      } else {
-        console.log(`⚠️ Joueur ${playerId}: 0 diamants (pas de progression)`);
-      }
-    }
-    
-    // Si DUO et bonus non attribué
-    if (challenge.mode === 'duo' && !challenge.bonusAwarded) {
-      if (challenge.checkBonus()) {
-        console.log('🎁 Conditions bonus remplies ! Attribution du doublement...');
-        
-        // Doubler les diamants (bonus)
-        for (const player of challenge.players) {
-          const playerId = typeof player.user === 'string' ? player.user : player.user._id;
-          
-          if (player.diamonds > 0) {
-            const result = await User.findByIdAndUpdate(
-              playerId,
-              { $inc: { totalDiamonds: player.diamonds } },
-              { new: true }
-            );
-            
-            if (result) {
-              console.log(`🎁 BONUS +${player.diamonds} diamants → ${playerId} (Total: ${result.totalDiamonds})`);
-              totalDiamondsAwarded += player.diamonds;
-            }
-          }
-        }
-        
-        challenge.bonusEarned = true;
-        challenge.bonusAwarded = true;
-      } else {
-        console.log('⚠️ Bonus DUO non débloqué (tous les joueurs doivent compléter)');
-        const completionStatus = challenge.players.map((p, i) => `Joueur ${i+1}: ${p.completed ? '✅' : '❌'}`);
-        console.log(`   Status: ${completionStatus.join(', ')}`);
-      }
-    }
-    
-    challenge.status = 'completed';
-    await challenge.save();
-    
-    console.log(`✅ Challenge ${challenge._id} finalisé - Total diamants: ${totalDiamondsAwarded}`);
+    console.log(`🏁 Finalisation challenge ${challenge._id} (mise) (mode: ${challenge.mode})...`);
+    // Settlement & payouts are handled in the service.
+    await challengeService.finalizeChallenge(challenge._id);
+    console.log(`✅ Challenge ${challenge._id} finalisé (mise)`);
   }
 
   // ⭐ Démarrer tous les CRON jobs
@@ -312,21 +256,7 @@ class ChallengeCron {
 
   // ✅ NEW: Méthode pour forcer bonus (pour tests)
   async manualBonus() {
-    console.log('🔧 [MANUAL] Exécution manuelle des bonus...');
-    await this._runWithLock('MANUAL_BONUS', async () => {
-      const duoChallenges = await WeeklyChallenge.find({
-        mode: 'duo',
-        status: 'active',
-        bonusEarned: true,
-        bonusAwarded: false
-      });
-      
-      for (const challenge of duoChallenges) {
-        if (challenge.checkBonus()) {
-          await challenge.awardBonus();
-        }
-      }
-    });
+    console.log('🔧 [MANUAL] Bonus désactivé (mise/settlement géré par le service).');
   }
 }
 

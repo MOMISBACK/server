@@ -22,8 +22,38 @@ const playerSchema = new mongoose.Schema({
   completed: {
     type: Boolean,
     default: false
+  },
+  completedAt: {
+    type: Date,
+    default: null
   }
 }, { _id: false });
+
+const stakeEntrySchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    amount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    status: {
+      type: String,
+      enum: ['held', 'refunded', 'burned', 'paid'],
+      default: 'held',
+      index: true,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
 
 // ✅ Schéma principal du challenge
 const weeklyChallengeSchema = new mongoose.Schema({
@@ -134,6 +164,34 @@ const weeklyChallengeSchema = new mongoose.Schema({
     enum: ['none', 'pending', 'accepted', 'refused'],
     default: 'none'
   },
+
+  // 💎 Stake system (diamonds as a bet)
+  stakePerPlayer: {
+    type: Number,
+    default: 10,
+    min: 0,
+  },
+  stakes: {
+    type: [stakeEntrySchema],
+    default: [],
+  },
+  settlement: {
+    status: {
+      type: String,
+      enum: ['none', 'success', 'loss', 'cancelled'],
+      default: 'none',
+      index: true,
+    },
+    reason: {
+      type: String,
+      enum: ['completed', 'expired', 'cancelled', 'refused'],
+      default: null,
+    },
+    settledAt: {
+      type: Date,
+      default: null,
+    },
+  },
   
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -215,47 +273,9 @@ weeklyChallengeSchema.methods.checkBonus = function() {
 };
 
 weeklyChallengeSchema.methods.awardBonus = async function() {
-  if (this.bonusAwarded) {
-    console.log('⚠️ Bonus déjà attribué pour ce challenge');
-    return false;
-  }
-  
-  if (!this.checkBonus()) {
-    console.log('⚠️ Bonus non débloqué (tous les joueurs doivent compléter)');
-    return false;
-  }
-  
-  const User = mongoose.model('User');
-  
-  console.log('🎁 Attribution du bonus DUO...');
-  
-  for (const player of this.players) {
-    const playerId = typeof player.user === 'string' 
-      ? player.user 
-      : player.user._id || player.user;
-    
-    const result = await User.findByIdAndUpdate(
-      playerId,
-      { $inc: { totalDiamonds: player.diamonds } },
-      { new: true }
-    );
-    
-    if (result) {
-      console.log(`💎 Bonus +${player.diamonds} diamants → User ${playerId}`);
-    }
-  }
-  
-  this.bonusEarned = true;
-  this.bonusAwarded = true;
-  
-  if (this.status !== 'completed') {
-    this.status = 'completed';
-  }
-  
-  await this.save();
-  
-  console.log('✅ Bonus DUO attribué ! Diamants doublés pour les 2 joueurs');
-  return true;
+  // Legacy method kept for backward compatibility.
+  // Diamonds are now handled via the stake/settlement system in the service layer.
+  return false;
 };
 
 weeklyChallengeSchema.methods.isExpired = function() {

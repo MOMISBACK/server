@@ -43,11 +43,11 @@ describe('🎯 Challenges API - Multi-objectifs', () => {
     expect(res.body.data.progress.goal).toBe(10);
 
     const after = await User.findById(userId).select('totalDiamonds');
-    expect(after.totalDiamonds).toBe((before?.totalDiamonds ?? 200) - 1);
+    expect(after.totalDiamonds).toBe((before?.totalDiamonds ?? 200) - 10);
   });
 
   test('❌ POST /api/challenges - Rejeter si diamants insuffisants (SOLO)', async () => {
-    await User.updateOne({ _id: userId }, { $set: { totalDiamonds: 0 } });
+    await User.updateOne({ _id: userId }, { $set: { totalDiamonds: 9 } });
 
     const res = await request(app)
       .post('/api/challenges')
@@ -280,7 +280,7 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(createRes.body.data.invitationStatus).toBe('pending');
 
     const creatorAfter = await User.findById(userId).select('totalDiamonds');
-    expect(creatorAfter.totalDiamonds).toBe((creatorBefore?.totalDiamonds ?? 200) - 1);
+    expect(creatorAfter.totalDiamonds).toBe((creatorBefore?.totalDiamonds ?? 200) - 10);
   });
 
   test('POST /api/challenges (duo) - Empêcher invitations pendantes dupliquées', async () => {
@@ -331,7 +331,7 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(res.body.data.invitationStatus).toBe('accepted');
 
     const inviteeAfter = await User.findById(partnerId).select('totalDiamonds');
-    expect(inviteeAfter.totalDiamonds).toBe((inviteeBefore?.totalDiamonds ?? 200) - 1);
+    expect(inviteeAfter.totalDiamonds).toBe((inviteeBefore?.totalDiamonds ?? 200) - 10);
   });
 
   test('❌ POST /api/challenges/:id/accept - Rejeter si diamants insuffisants (invitee DUO)', async () => {
@@ -346,7 +346,7 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(invite.status).toBe(201);
     const challengeId = invite.body.data._id;
 
-    await User.updateOne({ _id: partnerId }, { $set: { totalDiamonds: 0 } });
+    await User.updateOne({ _id: partnerId }, { $set: { totalDiamonds: 9 } });
 
     const res = await request(app)
       .post(`/api/challenges/${challengeId}/accept`)
@@ -444,6 +444,8 @@ describe('🎯 Duo / Invitations flows', () => {
     const { user: partnerUser, token: partnerToken } = await createTestUserWithToken();
     const partnerId = partnerUser._id.toString();
 
+    const creatorBefore = await User.findById(userId).select('totalDiamonds');
+
     const invite = await request(app)
       .post('/api/challenges')
       .set('Authorization', `Bearer ${authToken}`)
@@ -461,6 +463,10 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe('cancelled');
     expect(res.body.data.invitationStatus).toBe('refused');
+
+    const creatorAfter = await User.findById(userId).select('totalDiamonds');
+    // Refus: le créateur récupère sa mise.
+    expect(creatorAfter.totalDiamonds).toBe(creatorBefore.totalDiamonds);
   });
 
   test('POST /api/challenges/:id/finalize - Finaliser et attribuer diamants pour DUO', async () => {
@@ -510,12 +516,12 @@ describe('🎯 Duo / Invitations flows', () => {
     expect(finalize.status).toBe(200);
     expect(finalize.body.success).toBe(true);
 
-    // Vérifier que les deux utilisateurs ont reçu des diamants
-    const u1 = await User.findById(userId);
-    const u2 = await User.findById(partnerId);
+    // Vérifier payout mise: 10 misés chacun, gains x4 => +40 à chacun (net +30)
+    const u1 = await User.findById(userId).select('totalDiamonds');
+    const u2 = await User.findById(partnerId).select('totalDiamonds');
 
-    expect(u1.totalDiamonds).toBeGreaterThanOrEqual(0);
-    expect(u2.totalDiamonds).toBeGreaterThanOrEqual(0);
+    expect(u1.totalDiamonds).toBe(230);
+    expect(u2.totalDiamonds).toBe(230);
   });
 });
 
