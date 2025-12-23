@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
   // ✅ AJOUTÉ : Système de diamants
   totalDiamonds: {
     type: Number,
-    default: 0,
+    default: 200,
     min: 0
   },
   // ✅ Partner links (up to 2 slots: p1, p2)

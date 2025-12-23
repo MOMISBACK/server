@@ -15,7 +15,7 @@ const normalizePartnerLinks = (partnerLinks) => {
               _id: partnerDoc._id.toString(),
               username: partnerDoc.username,
               email: partnerDoc.email,
-              totalDiamonds: partnerDoc.totalDiamonds,
+              totalDiamonds: partnerDoc.totalDiamonds ?? 200,
             },
           }
         : {}),

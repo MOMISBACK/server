@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const DEFAULT_DIAMONDS = 200;
+
 const protect = async (req, res, next) => {
   let token;
 
@@ -22,6 +24,19 @@ const protect = async (req, res, next) => {
 
     if (!user) {
       return res.status(401).json({ message: 'Not authorized, user not found' });
+    }
+
+    // One-time backfill for legacy users created before the diamond system.
+    // Do NOT overwrite real balances (e.g. users who spent down to 0).
+    if (user.totalDiamonds === undefined || user.totalDiamonds === null) {
+      await User.updateOne(
+        {
+          _id: user._id,
+          $or: [{ totalDiamonds: { $exists: false } }, { totalDiamonds: null }],
+        },
+        { $set: { totalDiamonds: DEFAULT_DIAMONDS } }
+      );
+      user.totalDiamonds = DEFAULT_DIAMONDS;
     }
 
     req.user = user;
