@@ -165,6 +165,21 @@ const weeklyChallengeSchema = new mongoose.Schema({
     default: 'none'
   },
 
+  // ✅ DUO invitation agreement / counter-proposals
+  // A "proposal" is the current challenge config while status=pending.
+  // Any edit bumps the version and requires both players to sign again.
+  invitationVersion: {
+    type: Number,
+    default: 1,
+    min: 1,
+  },
+  // Map of userId -> signedAt for the current version
+  invitationSignatures: {
+    type: Map,
+    of: Date,
+    default: {},
+  },
+
   // 💎 Stake system (diamonds as a bet)
   stakePerPlayer: {
     type: Number,

@@ -190,6 +190,47 @@ router.post('/:id/refuse', protect, async (req, res) => {
   }
 });
 
+// POST /api/challenges/:id/sign
+// Sign the current pending DUO proposal (both players must sign before activation)
+router.post('/:id/sign', protect, async (req, res) => {
+  try {
+    const challenge = await challengeService.signInvitation(req.user.id, req.params.id, { allowCreator: true });
+
+    res.json({
+      success: true,
+      data: challenge,
+      message: challenge?.status === 'active'
+        ? 'Pacte signé ! Il commence.'
+        : 'Signature enregistrée. En attente de l’autre joueur.',
+    });
+  } catch (error) {
+    console.error('❌ Erreur POST /sign:', error.message);
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// PUT /api/challenges/:id/propose
+// Counter-propose (edit) a pending DUO invitation
+router.put('/:id/propose', protect, async (req, res) => {
+  try {
+    const challenge = await challengeService.proposeInvitationUpdate(req.user.id, req.params.id, req.body);
+    res.json({
+      success: true,
+      data: challenge,
+      message: 'Contre-proposition envoyée.',
+    });
+  } catch (error) {
+    console.error('❌ Erreur PUT /propose:', error.message);
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // POST /api/challenges/:id/finalize
 router.post('/:id/finalize', protect, async (req, res) => {
   try {

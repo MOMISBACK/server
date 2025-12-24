@@ -427,6 +427,8 @@ class ChallengeService {
         endDate: null,
         status: 'pending',
         invitationStatus: 'pending'
+        ,invitationVersion: 1
+        ,invitationSignatures: new Map([[String(creatorId), new Date()]])
         ,stakePerPlayer: this.STAKE_PER_PLAYER
         ,stakes: [{ user: creatorId, amount: this.STAKE_PER_PLAYER, status: 'held', updatedAt: new Date() }]
         ,settlement: { status: 'none', reason: null, settledAt: null }
@@ -454,58 +456,168 @@ class ChallengeService {
 
   // ⭐ Accepter une invitation DUO
   async acceptInvitation(userId, challengeId) {
-    let staked = false;
+    // Backward-compatible: "accept" = "sign" for the invitee.
+    return this.signInvitation(userId, challengeId, { allowCreator: false });
+  }
+
+  _isDecreaseProposal(prevChallenge, nextData) {
     try {
-      this._log('🔄 Acceptation invitation:', { userId, challengeId });
+      const prevGoal = prevChallenge?.goal;
+      const nextGoal = nextData?.goal;
+      const prevTypes = Array.isArray(prevChallenge?.activityTypes) ? prevChallenge.activityTypes : [];
+      const nextTypes = Array.isArray(nextData?.activityTypes) ? nextData.activityTypes : [];
+      const prevStake = Number(prevChallenge?.stakePerPlayer ?? this.STAKE_PER_PLAYER);
+      const nextStake = typeof nextData?.stakePerPlayer === 'number' ? Number(nextData.stakePerPlayer) : prevStake;
 
-      const challenge = await WeeklyChallenge.findById(challengeId);
-      
-      if (!challenge) {
-        throw new Error('Challenge introuvable');
-      }
+      const stakeDecrease = Number.isFinite(nextStake) && nextStake < prevStake;
+      const goalDecrease =
+        prevGoal && nextGoal && prevGoal.type === nextGoal.type &&
+        Number(nextGoal.value) < Number(prevGoal.value);
 
-      if (challenge.mode !== 'duo') {
-        throw new Error('Ce challenge n\'est pas en mode duo');
-      }
+      const typesDecrease =
+        nextTypes.length < prevTypes.length &&
+        nextTypes.every((t) => prevTypes.includes(t));
 
-      if (challenge.status !== 'pending' || challenge.invitationStatus !== 'pending') {
-        throw new Error('Cette invitation n\'est plus disponible');
-      }
+      return Boolean(stakeDecrease || goalDecrease || typesDecrease);
+    } catch {
+      return false;
+    }
+  }
 
-      const isPlayer = challenge.players.some(p => p.user.toString() === userId.toString());
-      if (!isPlayer) {
-        throw new Error('Vous n\'êtes pas invité à ce challenge');
-      }
+  // ✍️ Contre-proposition (update pending DUO invite)
+  // Any change resets signatures and requires both to sign again.
+  // If the proposal is a "decrease", it costs a flat fee of 5 diamonds (charged to the editor).
+  async proposeInvitationUpdate(userId, challengeId, data) {
+    const FEE_DECREASE = 5;
+    const now = new Date();
 
-      if (challenge.creator.toString() === userId.toString()) {
-        throw new Error('Vous ne pouvez pas accepter votre propre invitation');
-      }
+    const challenge = await WeeklyChallenge.findById(challengeId);
+    if (!challenge) throw new Error('Challenge introuvable');
+    if (challenge.mode !== 'duo') throw new Error('Ce challenge n\'est pas en mode duo');
+    if (challenge.status !== 'pending' || challenge.invitationStatus !== 'pending') {
+      throw new Error('Cette invitation n\'est plus disponible');
+    }
 
-      // Only prevent accepting if there is already another DUO involving the same pair.
-      const userActiveChallenge = await WeeklyChallenge.findOne({
-        mode: 'duo',
-        'players.user': { $all: [userId, challenge.creator] },
-        $or: [
-          { status: 'pending', invitationStatus: 'pending' },
-          { status: 'active', endDate: { $gt: new Date() } },
-        ],
-        _id: { $ne: challengeId }
-      });
+    const isPlayer = challenge.players.some((p) => p.user.toString() === userId.toString());
+    if (!isPlayer) throw new Error('Vous n\'êtes pas invité à ce challenge');
 
-      if (userActiveChallenge) {
-        throw new Error('Vous avez déjà un challenge en cours');
-      }
+    if (!data?.goal || !data.goal.type || !data.goal.value) {
+      throw new Error('Un objectif valide est requis');
+    }
+    if (!data?.activityTypes || data.activityTypes.length === 0) {
+      throw new Error('Au moins un type d\'activité est requis');
+    }
 
-      // Mise en jeu de l'invité au moment d'accepter
-      await this._debitDiamondsOrThrow(userId, this.STAKE_PER_PLAYER, {
-        kind: 'stake_hold',
+    const isDecrease = this._isDecreaseProposal(challenge, data);
+    if (isDecrease) {
+      await this._debitDiamondsOrThrow(userId, FEE_DECREASE, {
+        kind: 'pact_decrease_fee',
         refId: challengeId,
-        note: 'Mise acceptation pacte DUO',
+        note: 'Frais de baisse (contre-proposition pacte)',
       });
-      staked = true;
+    }
 
-      // ✅ CHANGÉ: Setter les dates quand le challenge est accepté (7 jours à partir de maintenant)
-      const { startDate, endDate } = this._calculate7DayChallengeDates();
+    challenge.goal = data.goal;
+    challenge.activityTypes = data.activityTypes;
+    if (typeof data.title === 'string' && data.title.trim()) challenge.title = data.title;
+    if (typeof data.icon === 'string' && data.icon.trim()) challenge.icon = data.icon;
+    if (typeof data.stakePerPlayer === 'number' && Number.isFinite(data.stakePerPlayer)) {
+      challenge.stakePerPlayer = data.stakePerPlayer;
+    }
+
+    challenge.invitationVersion = Number(challenge.invitationVersion || 1) + 1;
+    challenge.invitationSignatures = new Map([[String(userId), now]]);
+    await challenge.save();
+
+    return await WeeklyChallenge.findById(challengeId)
+      .populate('creator', 'username email')
+      .populate('players.user', 'username email totalDiamonds');
+  }
+
+  // ✍️ Sign the current pending DUO proposal
+  // When both players have signed the current version, the pact becomes active.
+  async signInvitation(userId, challengeId, options = {}) {
+    const allowCreator = options?.allowCreator !== false;
+    const now = new Date();
+
+    this._log('✍️ Signature invitation:', { userId, challengeId });
+
+    const challenge = await WeeklyChallenge.findById(challengeId);
+    if (!challenge) throw new Error('Challenge introuvable');
+    if (challenge.mode !== 'duo') throw new Error('Ce challenge n\'est pas en mode duo');
+    if (challenge.status !== 'pending' || challenge.invitationStatus !== 'pending') {
+      throw new Error('Cette invitation n\'est plus disponible');
+    }
+
+    const isPlayer = challenge.players.some((p) => p.user.toString() === userId.toString());
+    if (!isPlayer) throw new Error('Vous n\'êtes pas invité à ce challenge');
+
+    if (!allowCreator && challenge.creator.toString() === userId.toString()) {
+      throw new Error('Vous ne pouvez pas signer votre propre invitation ici');
+    }
+
+    // Only prevent signing if there is already another DUO involving the same pair.
+    const otherUserId = challenge.players
+      .map((p) => p.user.toString())
+      .find((id) => id !== userId.toString());
+
+    if (!otherUserId) throw new Error('Challenge invalide');
+
+    const userActiveChallenge = await WeeklyChallenge.findOne({
+      mode: 'duo',
+      'players.user': { $all: [userId, otherUserId] },
+      $or: [
+        { status: 'pending', invitationStatus: 'pending' },
+        { status: 'active', endDate: { $gt: new Date() } },
+      ],
+      _id: { $ne: challengeId }
+    });
+
+    if (userActiveChallenge) {
+      throw new Error('Vous avez déjà un challenge en cours');
+    }
+
+    if (!challenge.invitationSignatures) {
+      challenge.invitationSignatures = new Map();
+    }
+
+    const key = String(userId);
+    if (!challenge.invitationSignatures.get(key)) {
+      challenge.invitationSignatures.set(key, now);
+      await challenge.save();
+    }
+
+    const creatorId = String(challenge.creator);
+    const inviteeId = challenge.players.map((p) => p.user.toString()).find((id) => id !== creatorId);
+    if (!inviteeId) throw new Error('Challenge invalide');
+
+    const hasCreator = Boolean(challenge.invitationSignatures.get(creatorId));
+    const hasInvitee = Boolean(challenge.invitationSignatures.get(inviteeId));
+
+    if (!hasCreator || !hasInvitee) {
+      return await WeeklyChallenge.findById(challengeId)
+        .populate('creator', 'username email')
+        .populate('players.user', 'username email totalDiamonds');
+    }
+
+    // Both signed -> activate.
+    const { startDate, endDate } = this._calculate7DayChallengeDates();
+
+    // Hold invitee stake at activation time (creator stake is held at creation).
+    const inviteeStakeHeld = Array.isArray(challenge.stakes)
+      ? challenge.stakes.some((s) => s.user.toString() === inviteeId && s.status === 'held')
+      : false;
+
+    let inviteeDebited = false;
+    try {
+      if (!inviteeStakeHeld) {
+        await this._debitDiamondsOrThrow(inviteeId, this.STAKE_PER_PLAYER, {
+          kind: 'stake_hold',
+          refId: challengeId,
+          note: 'Mise signature pacte DUO',
+        });
+        inviteeDebited = true;
+      }
 
       const res = await WeeklyChallenge.updateOne(
         {
@@ -513,8 +625,6 @@ class ChallengeService {
           mode: 'duo',
           status: 'pending',
           invitationStatus: 'pending',
-          creator: challenge.creator,
-          'players.user': { $all: [userId, challenge.creator] },
         },
         {
           $set: {
@@ -523,37 +633,40 @@ class ChallengeService {
             status: 'active',
             invitationStatus: 'accepted',
           },
-          $push: {
-            stakes: { user: userId, amount: this.STAKE_PER_PLAYER, status: 'held', updatedAt: new Date() },
-          },
+          ...(inviteeStakeHeld
+            ? {}
+            : {
+                $push: {
+                  stakes: { user: inviteeId, amount: this.STAKE_PER_PLAYER, status: 'held', updatedAt: new Date() },
+                },
+              }),
         }
       );
 
       if (!res || res.modifiedCount !== 1) {
-        throw new Error('Cette invitation n\'est plus disponible');
+        // Activation race: refund if we debited but couldn't activate.
+        if (inviteeDebited) {
+          await this._creditDiamonds(inviteeId, this.STAKE_PER_PLAYER, {
+            kind: 'stake_refund',
+            refId: challengeId,
+            note: 'Remboursement mise (activation déjà effectuée)',
+          });
+        }
       }
-
-      const updated = await WeeklyChallenge.findById(challengeId);
-      if (!updated) {
-        throw new Error('Challenge introuvable');
-      }
-      
-      this._log('✅ Invitation acceptée avec succès (7 jours):', challengeId);
-      return updated;
-
-    } catch (error) {
-      if (staked) {
-        await this._creditDiamonds(userId, this.STAKE_PER_PLAYER, {
+    } catch (e) {
+      if (inviteeDebited) {
+        await this._creditDiamonds(inviteeId, this.STAKE_PER_PLAYER, {
           kind: 'stake_refund',
           refId: challengeId,
-          note: 'Remboursement mise (échec acceptation DUO)',
+          note: 'Remboursement mise (échec activation DUO)',
         });
       }
-      if (process.env.NODE_ENV !== 'test') {
-        console.error('❌ Erreur acceptation invitation:', error.message);
-      }
-      throw error;
+      throw e;
     }
+
+    return await WeeklyChallenge.findById(challengeId)
+      .populate('creator', 'username email')
+      .populate('players.user', 'username email totalDiamonds');
   }
 
   // ⭐ Refuser une invitation DUO
