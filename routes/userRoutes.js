@@ -14,6 +14,7 @@ const {
 	getIncomingPartnerInvites,
 	acceptPartnerInvite,
 	refusePartnerInvite,
+	claimDailyChest,
 } = require('../controllers/userController');
 
 // @route   GET /api/users/profile
@@ -55,6 +56,11 @@ router.get('/health', protect, getHealthStatus);
 // @desc    Update health integration status (link/unlink, autoImport, lastSyncAt)
 // @access  Private
 router.put('/health', protect, updateHealthStatus);
+
+// @route   POST /api/users/daily-chest
+// @desc    Claim daily chest reward (5 diamonds, 1 per 24h)
+// @access  Private
+router.post('/daily-chest', protect, claimDailyChest);
 
 // @route   POST /api/users/partner-invites
 // @desc    Send partner invite for a slot (p1/p2)

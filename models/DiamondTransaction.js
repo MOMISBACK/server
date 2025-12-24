@@ -17,7 +17,7 @@ const diamondTransactionSchema = new mongoose.Schema(
     },
     kind: {
       type: String,
-      enum: ['stake_hold', 'stake_refund', 'stake_burn', 'stake_payout', 'admin', 'other'],
+      enum: ['stake_hold', 'stake_refund', 'stake_burn', 'stake_payout', 'daily_chest', 'admin', 'other'],
       required: true,
       index: true,
     },

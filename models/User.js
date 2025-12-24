@@ -80,6 +80,11 @@ const userSchema = new mongoose.Schema({
       permissions: [{ type: String }],
     },
   },
+
+  // ✅ Daily chest (1 claim per 24h)
+  dailyChestLastOpenedAt: {
+    type: Date,
+  },
 }, {
   timestamps: true
 });

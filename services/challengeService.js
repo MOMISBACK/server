@@ -915,7 +915,8 @@ class ChallengeService {
 
     const query = {
       ...this._duoPairQuery(userId, partnerId),
-      status: { $in: ['active', 'completed'] },
+      // Include all non-pending challenges that represent a duo pact lifecycle.
+      status: { $in: ['active', 'completed', 'failed', 'cancelled'] },
     };
 
     const challenges = await WeeklyChallenge.find(query)
@@ -946,14 +947,9 @@ class ChallengeService {
   // ✅ NOUVEAU: Calculer 7 jours exactement à partir de maintenant
   // Utilisé quand un challenge est créé (SOLO) ou accepté (DUO)
   _calculate7DayChallengeDates() {
-    const now = new Date();
-    const startDate = new Date(now);
-    startDate.setHours(0, 0, 0, 0);
-    
-    // Le challenge se termine exactement 7 jours plus tard à 23:59:59.999
-    const endDate = new Date(now);
-    endDate.setDate(now.getDate() + 7);
-    endDate.setHours(23, 59, 59, 999);
+    const startDate = new Date();
+    // ✅ Durée fixe: exactement 7 * 24h à partir de l'activation
+    const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     this._log('📅 [_calculate7DayChallengeDates] Challenge 7 jours:', {
       start: startDate.toISOString(),

@@ -12,6 +12,7 @@ router.get('/duo/current', activityController.getCurrentDuoChallengeActivities);
 router.get('/shared/:partnerId', activityController.getSharedActivitiesWithPartner);
 router.get('/', activityController.getActivities); // ✅ Corrigé : getActivities (pas getUserActivities)
 router.post('/', validateCreateActivity, activityController.createActivity);
+router.patch('/:id/reaction', activityController.setActivityReaction);
 router.delete('/:id', activityController.deleteActivity);
 
 module.exports = router;

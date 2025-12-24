@@ -1,5 +1,9 @@
 const userService = require('../services/userService');
 const User = require('../models/User');
+const DiamondTransaction = require('../models/DiamondTransaction');
+
+const DAILY_CHEST_REWARD = 5;
+const DAILY_CHEST_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 const normalizePartnerLinks = (partnerLinks) => {
   const links = Array.isArray(partnerLinks) ? partnerLinks : [];
@@ -230,6 +234,74 @@ const updateHealthStatus = async (req, res) => {
   }
 };
 
+// POST /api/users/daily-chest
+// Claim the daily chest reward (once per 24h)
+const claimDailyChest = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const now = new Date();
+    const eligibleBefore = new Date(now.getTime() - DAILY_CHEST_COOLDOWN_MS);
+
+    // Concurrency-safe claim: only one request can win if multiple are sent.
+    const result = await User.updateOne(
+      {
+        _id: userId,
+        $or: [
+          { dailyChestLastOpenedAt: { $exists: false } },
+          { dailyChestLastOpenedAt: null },
+          { dailyChestLastOpenedAt: { $lte: eligibleBefore } },
+        ],
+      },
+      {
+        $set: { dailyChestLastOpenedAt: now },
+        $inc: { totalDiamonds: DAILY_CHEST_REWARD },
+      }
+    );
+
+    if (result.modifiedCount !== 1) {
+      const current = await User.findById(userId).select('dailyChestLastOpenedAt');
+      const last = current?.dailyChestLastOpenedAt ? new Date(current.dailyChestLastOpenedAt) : null;
+      const nextAvailableAt = last ? new Date(last.getTime() + DAILY_CHEST_COOLDOWN_MS) : new Date(now.getTime() + DAILY_CHEST_COOLDOWN_MS);
+      const msRemaining = Math.max(0, nextAvailableAt.getTime() - now.getTime());
+      return res.status(429).json({
+        success: false,
+        message: 'Coffre déjà ouvert. Réessaie plus tard.',
+        data: {
+          nextAvailableAt: nextAvailableAt.toISOString(),
+          msRemaining,
+        },
+      });
+    }
+
+    // Best-effort ledger
+    await DiamondTransaction.create({
+      user: userId,
+      amount: DAILY_CHEST_REWARD,
+      kind: 'daily_chest',
+      refModel: 'User',
+      refId: userId,
+      note: 'Daily chest reward',
+    }).catch(() => undefined);
+
+    const updated = await User.findById(userId).select('totalDiamonds dailyChestLastOpenedAt');
+    const lastOpenedAt = updated?.dailyChestLastOpenedAt ? new Date(updated.dailyChestLastOpenedAt) : now;
+    const nextAvailableAt = new Date(lastOpenedAt.getTime() + DAILY_CHEST_COOLDOWN_MS);
+
+    return res.json({
+      success: true,
+      data: {
+        reward: DAILY_CHEST_REWARD,
+        totalDiamonds: updated?.totalDiamonds,
+        dailyChestLastOpenedAt: lastOpenedAt.toISOString(),
+        nextAvailableAt: nextAvailableAt.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('❌ [claimDailyChest]:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 module.exports = {
   getUserProfile,
   getUsers,
@@ -239,6 +311,7 @@ module.exports = {
   updateUsername,
   getHealthStatus,
   updateHealthStatus,
+  claimDailyChest,
   sendPartnerInvite: async (req, res) => {
     try {
       const { partnerId, slot } = req.body;

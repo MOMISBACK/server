@@ -147,11 +147,56 @@ const deleteActivity = asyncHandler(async (req, res) => {
   res.status(200).json({ message: 'Activité supprimée avec succès' });
 });
 
+/**
+ * Sets (or clears) a reaction on an activity.
+ * Body: { reaction: 'like' | 'love' | 'fire' | null }
+ * Allowed: activity owner OR confirmed partner of the owner.
+ */
+const setActivityReaction = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { reaction } = req.body || {};
+
+  const allowed = ['like', 'love', 'fire'];
+  const isClear = reaction === null || reaction === undefined || reaction === '';
+  if (!isClear && !allowed.includes(reaction)) {
+    return res.status(400).json({ message: 'Réaction invalide' });
+  }
+
+  const activity = await Activity.findById(id).populate('user', '_id');
+  if (!activity) throw new NotFoundError('Activité');
+
+  const me = req.user.id.toString();
+  const ownerId = (activity.user && typeof activity.user === 'object' ? activity.user._id : activity.user).toString();
+
+  const links = Array.isArray(req.user.partnerLinks) ? req.user.partnerLinks : [];
+  const isConfirmedPartner = links.some(
+    (l) => l?.status === 'confirmed' && l?.partnerId && l.partnerId.toString() === ownerId,
+  );
+  const isOwner = ownerId === me;
+
+  if (!isOwner && !isConfirmedPartner) {
+    throw new ForbiddenError("Vous n'êtes pas autorisé à réagir à cette activité");
+  }
+
+  if (!activity.reactions) activity.reactions = new Map();
+
+  if (isClear) {
+    activity.reactions.delete(me);
+  } else {
+    activity.reactions.set(me, reaction);
+  }
+
+  await activity.save();
+  const refreshed = await Activity.findById(id).populate('user', 'username email');
+  res.status(200).json(refreshed);
+});
+
 module.exports = {
   createActivity,
   getActivities,
   getCurrentDuoChallengeActivities,
   getSharedActivitiesWithPartner,
   getActivityById,
+  setActivityReaction,
   deleteActivity,
 };

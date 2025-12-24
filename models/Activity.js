@@ -95,6 +95,17 @@ const activitySchema = new mongoose.Schema({
 
   // Pour workout
   exercises: [exerciseSchema],
+
+  // Réactions (visibles par les 2 joueurs)
+  // Map: { [userId]: 'like' | 'love' | 'fire' }
+  reactions: {
+    type: Map,
+    of: {
+      type: String,
+      enum: ['like', 'love', 'fire'],
+    },
+    default: {},
+  },
 }, {
   timestamps: true,
 });
@@ -134,7 +145,7 @@ activitySchema.pre('validate', function () {
 
   const allAllowedFields = new Set([
     // Champs communs autorisés
-    'user', 'title', 'type', 'startTime', 'endTime', 'duration', 'date', 'source', 'externalSource', 'externalId',
+    'user', 'title', 'type', 'startTime', 'endTime', 'duration', 'date', 'source', 'externalSource', 'externalId', 'reactions',
     // Champs ajoutés par Mongoose/MongoDB
     '_id', 'id', 'createdAt', 'updatedAt', '__v',
     // Champs spécifiques au type
