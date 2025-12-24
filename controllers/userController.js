@@ -2,8 +2,8 @@ const userService = require('../services/userService');
 const User = require('../models/User');
 const DiamondTransaction = require('../models/DiamondTransaction');
 
-const DAILY_CHEST_REWARD = 5;
-const DAILY_CHEST_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DAILY_CHEST_REWARD = 1;
+const DAILY_CHEST_MAX_CLAIMS_PER_DAY = 3;
 
 const normalizePartnerLinks = (partnerLinks) => {
   const links = Array.isArray(partnerLinks) ? partnerLinks : [];
@@ -235,40 +235,65 @@ const updateHealthStatus = async (req, res) => {
 };
 
 // POST /api/users/daily-chest
-// Claim the daily chest reward (once per 24h)
+// Claim the daily chest reward (up to 3 times per UTC day)
 const claimDailyChest = async (req, res) => {
   try {
     const userId = req.user.id;
     const now = new Date();
-    const eligibleBefore = new Date(now.getTime() - DAILY_CHEST_COOLDOWN_MS);
+    const today = now.toISOString().slice(0, 10); // UTC YYYY-MM-DD
 
-    // Concurrency-safe claim: only one request can win if multiple are sent.
+    // Concurrency-safe claim:
+    // - if new day: reset counter to 1
+    // - else increment counter
+    // - reject if already claimed 3 times today
     const result = await User.updateOne(
       {
         _id: userId,
         $or: [
-          { dailyChestLastOpenedAt: { $exists: false } },
-          { dailyChestLastOpenedAt: null },
-          { dailyChestLastOpenedAt: { $lte: eligibleBefore } },
+          { dailyChestClaimDate: { $ne: today } },
+          { dailyChestClaimDate: { $exists: false } },
+          { dailyChestClaimDate: null },
+          { dailyChestClaimDate: today, dailyChestClaimsToday: { $lt: DAILY_CHEST_MAX_CLAIMS_PER_DAY } },
         ],
       },
-      {
-        $set: { dailyChestLastOpenedAt: now },
-        $inc: { totalDiamonds: DAILY_CHEST_REWARD },
-      }
+      [
+        {
+          $set: {
+            dailyChestClaimDate: {
+              $cond: [{ $eq: ['$dailyChestClaimDate', today] }, '$dailyChestClaimDate', today],
+            },
+            dailyChestClaimsToday: {
+              $cond: [
+                { $eq: ['$dailyChestClaimDate', today] },
+                { $add: ['$dailyChestClaimsToday', 1] },
+                1,
+              ],
+            },
+            dailyChestLastOpenedAt: now,
+          },
+        },
+        {
+          $set: {
+            totalDiamonds: { $add: ['$totalDiamonds', DAILY_CHEST_REWARD] },
+          },
+        },
+      ],
+      { updatePipeline: true }
     );
 
     if (result.modifiedCount !== 1) {
-      const current = await User.findById(userId).select('dailyChestLastOpenedAt');
-      const last = current?.dailyChestLastOpenedAt ? new Date(current.dailyChestLastOpenedAt) : null;
-      const nextAvailableAt = last ? new Date(last.getTime() + DAILY_CHEST_COOLDOWN_MS) : new Date(now.getTime() + DAILY_CHEST_COOLDOWN_MS);
-      const msRemaining = Math.max(0, nextAvailableAt.getTime() - now.getTime());
+      const current = await User.findById(userId).select('dailyChestClaimDate dailyChestClaimsToday');
+      const claimsDate = current?.dailyChestClaimDate || today;
+      const claimsToday = claimsDate === today ? Number(current?.dailyChestClaimsToday || 0) : 0;
+      const claimsRemaining = Math.max(0, DAILY_CHEST_MAX_CLAIMS_PER_DAY - claimsToday);
+
       return res.status(429).json({
         success: false,
-        message: 'Coffre déjà ouvert. Réessaie plus tard.',
+        message: `Cadeau déjà récupéré ${DAILY_CHEST_MAX_CLAIMS_PER_DAY} fois aujourd’hui.`,
         data: {
-          nextAvailableAt: nextAvailableAt.toISOString(),
-          msRemaining,
+          dailyChestClaimDate: today,
+          dailyChestClaimsToday: claimsToday,
+          claimsRemaining,
         },
       });
     }
@@ -283,17 +308,20 @@ const claimDailyChest = async (req, res) => {
       note: 'Daily chest reward',
     }).catch(() => undefined);
 
-    const updated = await User.findById(userId).select('totalDiamonds dailyChestLastOpenedAt');
-    const lastOpenedAt = updated?.dailyChestLastOpenedAt ? new Date(updated.dailyChestLastOpenedAt) : now;
-    const nextAvailableAt = new Date(lastOpenedAt.getTime() + DAILY_CHEST_COOLDOWN_MS);
+    const updated = await User.findById(userId).select('totalDiamonds dailyChestLastOpenedAt dailyChestClaimDate dailyChestClaimsToday');
+    const claimsDate = updated?.dailyChestClaimDate || today;
+    const claimsToday = claimsDate === today ? Number(updated?.dailyChestClaimsToday || 0) : 0;
+    const claimsRemaining = Math.max(0, DAILY_CHEST_MAX_CLAIMS_PER_DAY - claimsToday);
 
     return res.json({
       success: true,
       data: {
         reward: DAILY_CHEST_REWARD,
         totalDiamonds: updated?.totalDiamonds,
-        dailyChestLastOpenedAt: lastOpenedAt.toISOString(),
-        nextAvailableAt: nextAvailableAt.toISOString(),
+        dailyChestLastOpenedAt: (updated?.dailyChestLastOpenedAt ? new Date(updated.dailyChestLastOpenedAt) : now).toISOString(),
+        dailyChestClaimDate: today,
+        dailyChestClaimsToday: claimsToday,
+        claimsRemaining,
       },
     });
   } catch (error) {

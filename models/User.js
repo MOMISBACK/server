@@ -85,6 +85,17 @@ const userSchema = new mongoose.Schema({
   dailyChestLastOpenedAt: {
     type: Date,
   },
+
+  // ✅ Daily chest (up to 3 claims per day)
+  // Stored as a UTC date string: YYYY-MM-DD
+  dailyChestClaimDate: {
+    type: String,
+  },
+  dailyChestClaimsToday: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
 }, {
   timestamps: true
 });
