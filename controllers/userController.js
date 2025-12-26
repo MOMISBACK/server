@@ -2,7 +2,7 @@ const userService = require('../services/userService');
 const User = require('../models/User');
 const DiamondTransaction = require('../models/DiamondTransaction');
 
-const DAILY_CHEST_REWARD = 1;
+const DAILY_CHEST_REWARD = 5;
 const DAILY_CHEST_MAX_CLAIMS_PER_DAY = 3;
 
 const normalizePartnerLinks = (partnerLinks) => {
