@@ -9,6 +9,12 @@ const playerSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  // Optional per-player goal value override (supports asymmetrical DUO goals)
+  goalValue: {
+    type: Number,
+    default: null,
+    min: 0.1,
+  },
   progress: {
     type: Number,
     default: 0,

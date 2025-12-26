@@ -465,7 +465,7 @@ class ChallengeService {
 
   // ⭐ Créer un challenge DUO (avec invitation)
   async createDuoChallenge(creatorId, partnerId, data) {
-    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, recurrence } = data;
+    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, recurrence, customGoals } = data;
 
     // ✅ Validation basique
     if (!goal || !goal.type || !goal.value) {
@@ -584,12 +584,22 @@ class ChallengeService {
 
       // ✅ CHANGÉ: Ne pas setter les dates à la création (pending)
       // Les dates seront settées quand le challenge sera accepté
+      const creatorGoalValue = customGoals && typeof customGoals === 'object'
+        ? Number(customGoals[String(creatorId)])
+        : NaN;
+      const partnerGoalValue = customGoals && typeof customGoals === 'object'
+        ? Number(customGoals[String(partnerId)])
+        : NaN;
+
+      const creatorGoalValueSafe = Number.isFinite(creatorGoalValue) && creatorGoalValue > 0 ? creatorGoalValue : null;
+      const partnerGoalValueSafe = Number.isFinite(partnerGoalValue) && partnerGoalValue > 0 ? partnerGoalValue : null;
+
       const challenge = new WeeklyChallenge({
         mode: 'duo',
         creator: creatorId,
         players: [
-          { user: creatorId, progress: 0, diamonds: 0, completed: false },
-          { user: partnerId, progress: 0, diamonds: 0, completed: false }
+          { user: creatorId, goalValue: creatorGoalValueSafe, progress: 0, diamonds: 0, completed: false },
+          { user: partnerId, goalValue: partnerGoalValueSafe, progress: 0, diamonds: 0, completed: false }
         ],
         goal,
         activityTypes,
@@ -683,6 +693,22 @@ class ChallengeService {
       throw new Error('Au moins un type d\'activité est requis');
     }
 
+    // ✅ Validate perActivityGoals if provided (or explicitly cleared)
+    if (data?.perActivityGoals !== undefined && data?.perActivityGoals !== null) {
+      const perActivityGoals = data.perActivityGoals;
+      if (typeof perActivityGoals !== 'object') {
+        throw new Error('Objectifs par activité invalides');
+      }
+      for (const [type, goalData] of Object.entries(perActivityGoals)) {
+        if (!data.activityTypes.includes(type)) {
+          throw new Error(`Type d'activité ${type} non sélectionné`);
+        }
+        if (!goalData?.type || !goalData?.value || goalData.value <= 0) {
+          throw new Error(`Objectif invalide pour ${type}`);
+        }
+      }
+    }
+
     const isDecrease = this._isDecreaseProposal(challenge, data);
     if (isDecrease) {
       await this._debitDiamondsOrThrow(userId, FEE_DECREASE, {
@@ -698,6 +724,78 @@ class ChallengeService {
     if (typeof data.icon === 'string' && data.icon.trim()) challenge.icon = data.icon;
     if (typeof data.stakePerPlayer === 'number' && Number.isFinite(data.stakePerPlayer)) {
       challenge.stakePerPlayer = data.stakePerPlayer;
+    }
+
+    // Optional: per-player asymmetric goals (goal values per user)
+    if (data?.customGoals !== undefined) {
+      const cg = data.customGoals;
+      if (cg && typeof cg === 'object') {
+        for (const pl of challenge.players) {
+          const uid = String(pl.user);
+          const v = Number(cg[uid]);
+          pl.goalValue = Number.isFinite(v) && v > 0 ? v : null;
+        }
+      } else if (cg === null) {
+        for (const pl of challenge.players) {
+          pl.goalValue = null;
+        }
+      }
+    }
+
+    // Optional: custom title (can be cleared)
+    if (data.customTitle !== undefined) {
+      if (data.customTitle === null) {
+        challenge.customTitle = null;
+      } else if (typeof data.customTitle === 'string') {
+        const ct = data.customTitle.trim();
+        challenge.customTitle = ct ? ct : null;
+      }
+    }
+
+    // Optional: per-activity goals (can be cleared)
+    if (data.perActivityGoals !== undefined) {
+      if (data.perActivityGoals === null) {
+        challenge.perActivityGoals = null;
+      } else {
+        const keys = data.perActivityGoals && typeof data.perActivityGoals === 'object'
+          ? Object.keys(data.perActivityGoals)
+          : [];
+
+        if (!keys.length) {
+          challenge.perActivityGoals = null;
+        } else {
+          const perActivityGoalsMap = new Map();
+          for (const [type, goalData] of Object.entries(data.perActivityGoals)) {
+            perActivityGoalsMap.set(type, { type: goalData.type, value: goalData.value });
+          }
+          challenge.perActivityGoals = perActivityGoalsMap;
+        }
+      }
+    }
+
+    // Optional: recurrence (can be enabled/disabled during negotiation)
+    if (data.recurrence !== undefined && data.recurrence !== null) {
+      const enabled = Boolean(data.recurrence?.enabled);
+      if (!challenge.recurrence) {
+        challenge.recurrence = {
+          enabled: false,
+          weeksCount: null,
+          weeksCompleted: 0,
+          parentChallengeId: null,
+        };
+      }
+      challenge.recurrence.enabled = enabled;
+      if (enabled) {
+        const rawWeeks = Number(data.recurrence?.weeksCount ?? 4);
+        const weeks = Math.min(52, Math.max(1, Number.isFinite(rawWeeks) ? rawWeeks : 4));
+        challenge.recurrence.weeksCount = weeks;
+        challenge.recurrence.weeksCompleted = 0;
+        challenge.recurrence.parentChallengeId = null;
+      } else {
+        challenge.recurrence.weeksCount = null;
+        challenge.recurrence.weeksCompleted = 0;
+        challenge.recurrence.parentChallengeId = null;
+      }
     }
 
     challenge.invitationVersion = Number(challenge.invitationVersion || 1) + 1;
@@ -947,6 +1045,11 @@ class ChallengeService {
       // ✅ NEW: Check if we have per-activity goals
       const hasPerActivityGoals = challenge.perActivityGoals && challenge.perActivityGoals.size > 0;
 
+      const targetValue =
+        Number.isFinite(Number(challenge.players[i]?.goalValue)) && Number(challenge.players[i]?.goalValue) > 0
+          ? Number(challenge.players[i].goalValue)
+          : Number(challenge.goal.value);
+
       let current = 0;
       let completed = false;
 
@@ -994,9 +1097,9 @@ class ChallengeService {
         challenge.players[i].perActivityProgress = perActivityProgress;
 
         // Overall progress is percentage of goals completed (0-100 scale)
-        // But we use goalValue as total for diamond calculation, so we scale to goalValue
+        // Scale to the player's targetValue (supports asymmetrical goals).
         const completionRatio = totalGoals > 0 ? totalGoalsCompleted / totalGoals : 0;
-        current = Math.round(completionRatio * challenge.goal.value);
+        current = Math.round(completionRatio * targetValue);
         completed = totalGoalsCompleted >= totalGoals;
       } else {
         // Global goal mode (original behavior)
@@ -1011,11 +1114,11 @@ class ChallengeService {
             current = activities.length;
             break;
         }
-        completed = current >= challenge.goal.value;
+        completed = current >= targetValue;
       }
 
       const diamonds = Math.min(
-        Math.floor((current / challenge.goal.value) * 4),
+        Math.floor((current / targetValue) * 4),
         4
       );
 
