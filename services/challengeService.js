@@ -1051,29 +1051,38 @@ class ChallengeService {
 
   // ⭐ Récupérer les invitations en attente d'un utilisateur
   async getPendingInvitations(userId) {
+    // Semantics: a "pending invitation" is a pending DUO proposal that still requires
+    // the user's signature for the current invitationVersion.
+    const signatureKey = `invitationSignatures.${String(userId)}`;
+
     const invitations = await WeeklyChallenge.find({
       'players.user': userId,
-      creator: { $ne: userId },
       status: 'pending',
-      invitationStatus: 'pending'
+      invitationStatus: 'pending',
+      $or: [
+        { invitationSignatures: { $exists: false } },
+        { [signatureKey]: { $exists: false } },
+      ],
     })
-    .populate('creator', 'username email')
-    .populate('players.user', 'username email')
-    .sort({ createdAt: -1 });
+      .populate('creator', 'username email')
+      .populate('players.user', 'username email')
+      .sort({ createdAt: -1 });
 
-    this._log(`📬 ${invitations.length} invitation(s) trouvée(s) pour user ${userId}`);
+    this._log(`📬 ${invitations.length} invitation(s) à signer pour user ${userId}`);
     return invitations;
   }
 
   // ⭐ Récupérer l'invitation envoyée (pending) par le créateur
   async getPendingSentChallenge(userId, options = {}) {
     const slot = options?.slot;
+    const signatureKey = `invitationSignatures.${String(userId)}`;
 
     let query = {
-      creator: userId,
       mode: 'duo',
+      'players.user': userId,
       status: 'pending',
       invitationStatus: 'pending',
+      [signatureKey]: { $exists: true },
     };
 
     if (slot === 'p1' || slot === 'p2') {
