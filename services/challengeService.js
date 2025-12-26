@@ -1109,8 +1109,10 @@ class ChallengeService {
       query = { ...query, mode: 'solo' };
     } else if (slot === 'p1' || slot === 'p2') {
       const partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
-      if (!partnerId) throw new Error('Aucun partenaire actif pour ce slot');
-      query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+      if (partnerId) {
+        query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+      }
+      // If no partner, still try to find any challenge for this user as creator
     }
 
     const challenge = await WeeklyChallenge.findOne(query);
@@ -1162,8 +1164,12 @@ class ChallengeService {
       query = { ...query, mode: 'solo' };
     } else if (slot === 'p1' || slot === 'p2') {
       const partnerId = await this._getConfirmedPartnerIdForSlot(userId, slot);
-      if (!partnerId) throw new Error('Aucun partenaire actif pour ce slot');
-      query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+      if (partnerId) {
+        // If partner exists, filter by the duo pair
+        query = { ...query, ...this._duoPairQuery(userId, partnerId) };
+      }
+      // If no partner, still try to find any challenge for this user
+      // This allows cleaning up orphaned challenges or SOLO challenges when on p1/p2 slot
     }
 
     const challenge = await WeeklyChallenge.findOne(query);
