@@ -16,8 +16,8 @@ const validateCreateChallenge = [
 
   body('goalType')
     .notEmpty().withMessage('Le type d\'objectif est obligatoire')
-    .isIn(['distance', 'duration', 'count'])
-    .withMessage('Type d\'objectif invalide (distance, duration ou count)'),
+    .isIn(['distance', 'duration', 'count', 'effort_points'])
+    .withMessage('Type d\'objectif invalide (distance, duration, count ou effort_points)'),
 
   body('goalValue')
     .notEmpty().withMessage('La valeur de l\'objectif est obligatoire')
@@ -64,7 +64,7 @@ const validateUpdateChallenge = [
 
   body('goalType')
     .optional()
-    .isIn(['distance', 'duration', 'count'])
+    .isIn(['distance', 'duration', 'count', 'effort_points'])
     .withMessage('Type d\'objectif invalide'),
 
   body('goalValue')

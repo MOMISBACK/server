@@ -121,6 +121,99 @@ class ChallengeService {
     entry.updatedAt = new Date();
   }
 
+  async _payoutStakeAmountIfHeld(challenge, userId, amount, meta = {}) {
+    const entry = this._getStakeEntry(challenge, userId);
+    if (!entry || entry.status !== 'held') return;
+
+    const payout = Number(amount);
+    if (!Number.isFinite(payout) || payout < 0) return;
+
+    await this._creditDiamonds(userId, payout, {
+      kind: meta.kind || 'stake_payout',
+      refId: challenge?._id,
+      note: meta.note || 'Gain pacte',
+    });
+
+    entry.status = 'paid';
+    entry.paidAmount = payout;
+    entry.updatedAt = new Date();
+  }
+
+  async _refundStakeAmountIfHeld(challenge, userId, amount, meta = {}) {
+    const entry = this._getStakeEntry(challenge, userId);
+    if (!entry || entry.status !== 'held') return;
+
+    const refund = Number(amount);
+    if (!Number.isFinite(refund) || refund < 0) return;
+
+    const safeRefund = Math.min(refund, Number(entry.amount) || 0);
+    if (safeRefund > 0) {
+      await this._creditDiamonds(userId, safeRefund, {
+        kind: meta.kind || 'stake_refund',
+        refId: challenge?._id,
+        note: meta.note || 'Remboursement de mise',
+      });
+    }
+
+    const burned = Math.max(0, (Number(entry.amount) || 0) - safeRefund);
+    if (burned > 0) {
+      await this._recordDiamondTx({
+        userId,
+        amount: 0,
+        kind: meta.burnKind || 'stake_burn',
+        refId: challenge?._id,
+        note: meta.burnNote || 'Mise brûlée',
+      });
+    }
+
+    entry.status = safeRefund > 0 ? 'refunded' : 'burned';
+    entry.refundedAmount = safeRefund;
+    entry.burnedAmount = burned;
+    entry.updatedAt = new Date();
+  }
+
+  _clamp(x, min, max) {
+    const n = Number(x);
+    if (!Number.isFinite(n)) return min;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  _isEffortPointsPact(challenge) {
+    return Boolean(challenge && challenge.mode === 'duo' && challenge.goal?.type === 'effort_points');
+  }
+
+  _calcEffortPointsForActivities(activities) {
+    const byType = new Map();
+    for (const a of activities || []) {
+      if (!a) continue;
+      const t = a.type;
+      if (!t) continue;
+      const agg = byType.get(t) || { km: 0, min: 0, sessions: 0 };
+      agg.km += Number(a.distance || 0);
+      agg.min += Number(a.duration || 0);
+      agg.sessions += 1;
+      byType.set(t, agg);
+    }
+
+    const weights = {
+      walking: { km: 0.35, min: 0.06, sessions: 0.5 },
+      running: { km: 0.8, min: 0.1, sessions: 0.7 },
+      cycling: { km: 0.2, min: 0.05, sessions: 0.6 },
+      swimming: { km: 2.0, min: 0.08, sessions: 0.7 },
+      workout: { km: 0.0, min: 0.09, sessions: 0.9 },
+    };
+
+    let total = 0;
+    for (const [type, agg] of byType.entries()) {
+      const w = weights[type];
+      if (!w) continue;
+      total += (w.km * (agg.km || 0)) + (w.min * (agg.min || 0)) + (w.sessions * (agg.sessions || 0));
+    }
+
+    // Keep a stable, readable number for UI.
+    return Math.round(total * 10) / 10;
+  }
+
   _isExpired(challenge) {
     if (!challenge?.endDate) return false;
     return new Date() > new Date(challenge.endDate);
@@ -272,6 +365,106 @@ class ChallengeService {
 
     const isExpired = this._isExpired(challenge);
     const isSuccess = this._isSuccess(challenge);
+
+    // Special settlement: 7-day PE pact (DUO) with partial refund + limited advantage.
+    // IMPORTANT: settle only at expiry to allow progress > 100% (capped at 120% for payout).
+    if (this._isEffortPointsPact(challenge)) {
+      if (!isExpired) return challenge;
+
+      const goal = Number(challenge.goal?.value || 35);
+      const stakePerPlayer = Number(challenge.stakePerPlayer ?? this.STAKE_PER_PLAYER);
+      const pot = stakePerPlayer * 2;
+
+      const now = new Date();
+      const startDateNormalized = new Date(challenge.startDate);
+      startDateNormalized.setHours(0, 0, 0, 0);
+      const endDateNormalized = new Date(challenge.endDate);
+      endDateNormalized.setHours(23, 59, 59, 999);
+
+      // Recompute PE from activities at expiry for correctness.
+      const playerTotals = [];
+      for (let i = 0; i < (challenge.players || []).length; i++) {
+        const p = challenge.players[i];
+        const pid = typeof p.user === 'string' ? p.user : p.user._id;
+
+        const createdAtDate = challenge.createdAt ? new Date(challenge.createdAt) : startDateNormalized;
+        const lowerBound = startDateNormalized > createdAtDate ? startDateNormalized : createdAtDate;
+
+        const activityQuery = {
+          user: pid,
+          date: { $gte: startDateNormalized, $lte: endDateNormalized },
+          createdAt: { $gte: lowerBound },
+          type: { $in: challenge.activityTypes },
+        };
+        const activities = await Activity.find(activityQuery);
+        const peTotal = this._calcEffortPointsForActivities(activities);
+        challenge.players[i].progress = peTotal;
+        const wasCompleted = Boolean(challenge.players[i].completed);
+        const completed = peTotal >= goal;
+        challenge.players[i].completed = completed;
+        if (!wasCompleted && completed) {
+          challenge.players[i].completedAt = now;
+        }
+        playerTotals.push({ userId: pid, peTotal });
+      }
+
+      const r = playerTotals.map((p) => {
+        const ri = goal > 0 ? Number(p.peTotal) / goal : 0;
+        return Number.isFinite(ri) ? ri : 0;
+      });
+
+      const rCap = r.map((x) => Math.min(x, 1.2));
+      const bothHitGoal = r.every((x) => x >= 1.0);
+
+      if (bothHitGoal) {
+        const minCap = Math.min(rCap[0] ?? 0, rCap[1] ?? 0);
+        const avgCap = ((rCap[0] ?? 0) + (rCap[1] ?? 0)) / 2;
+        const rPair = (minCap + avgCap) / 2;
+
+        const M = this._clamp(1.2 + 1.5 * (rPair - 1.0), 1.2, 2.0);
+        const gTotal = Math.round(pot * M);
+
+        const denom = (rCap[0] ?? 0) + (rCap[1] ?? 0);
+        const pRaw = denom > 0 ? (rCap[0] ?? 0) / denom : 0.5;
+        const p1 = this._clamp(pRaw, 0.45, 0.55);
+        const gain1 = Math.round(gTotal * p1);
+        const gain2 = gTotal - gain1;
+
+        await this._payoutStakeAmountIfHeld(challenge, playerTotals[0].userId, gain1, {
+          kind: 'stake_payout',
+          note: 'Gain pacte PE (7 jours)',
+        });
+        await this._payoutStakeAmountIfHeld(challenge, playerTotals[1].userId, gain2, {
+          kind: 'stake_payout',
+          note: 'Gain pacte PE (7 jours)',
+        });
+
+        challenge.settlement = { status: 'success', reason: 'completed', settledAt: now };
+        challenge.status = 'completed';
+        await challenge.save();
+
+        await this._handleRecurrenceIfNeeded(challenge);
+        return challenge;
+      }
+
+      // Not successful: partial refund per player based on their own r (uncapped), remainder burned.
+      for (let i = 0; i < playerTotals.length; i++) {
+        const pid = playerTotals[i].userId;
+        const refundRatio = this._clamp(r[i] ?? 0, 0, 1);
+        const refund = Math.round(stakePerPlayer * refundRatio);
+        await this._refundStakeAmountIfHeld(challenge, pid, refund, {
+          kind: 'stake_refund',
+          note: 'Remboursement partiel pacte PE (7 jours)',
+          burnKind: 'stake_burn',
+          burnNote: 'Mise restante brûlée (pacte PE non réussi)',
+        });
+      }
+
+      challenge.settlement = { status: 'loss', reason: 'expired', settledAt: now };
+      challenge.status = 'failed';
+      await challenge.save();
+      return challenge;
+    }
 
     if (isSuccess) {
       const multiplier = this.STAKE_PAYOUT_MULTIPLIER;
@@ -1132,7 +1325,12 @@ class ChallengeService {
       let current = 0;
       let completed = false;
 
-      if (hasPerPlayerActivityGoals) {
+      if (challenge.goal?.type === 'effort_points') {
+        // Points d'Effort (PE): multi-activités, un score unique.
+        current = this._calcEffortPointsForActivities(activities);
+        completed = current >= targetValue;
+        // No perActivityProgress for this mode.
+      } else if (hasPerPlayerActivityGoals) {
         const perActivityProgress = {};
         const goalsForPlayer = (challenge.perPlayerActivityGoals || {})[String(playerId)] || {};
         const entries = Object.entries(goalsForPlayer);

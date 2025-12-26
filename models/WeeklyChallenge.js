@@ -2,7 +2,6 @@
 
 const mongoose = require('mongoose');
 
-// ✅ Sous-schéma pour un joueur dans le challenge
 const playerSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -57,6 +56,22 @@ const stakeEntrySchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    // Optional settlement details (supports partial refunds and custom payouts)
+    refundedAmount: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    burnedAmount: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    paidAmount: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
   },
   { _id: false }
 );
@@ -93,7 +108,7 @@ const weeklyChallengeSchema = new mongoose.Schema({
   goal: {
     type: {
       type: String,
-      enum: ['distance', 'duration', 'count'],
+      enum: ['distance', 'duration', 'count', 'effort_points'],
       required: true
     },
     value: {
