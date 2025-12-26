@@ -178,8 +178,82 @@ class ChallengeService {
     return Math.max(min, Math.min(max, n));
   }
 
-  _isEffortPointsPact(challenge) {
-    return Boolean(challenge && challenge.mode === 'duo' && challenge.goal?.type === 'effort_points');
+  _hasMultiGoals(challenge) {
+    const mg = challenge?.multiGoals;
+    if (!mg || typeof mg !== 'object') return false;
+    return Boolean(
+      (Number(mg.distance) > 0) ||
+      (Number(mg.duration) > 0) ||
+      (Number(mg.count) > 0)
+    );
+  }
+
+  _getMultiGoals(challenge) {
+    const mg = challenge?.multiGoals;
+    if (!mg || typeof mg !== 'object') return null;
+    const distance = Number(mg.distance);
+    const duration = Number(mg.duration);
+    const count = Number(mg.count);
+    const out = {
+      distance: Number.isFinite(distance) && distance > 0 ? distance : null,
+      duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+      count: Number.isFinite(count) && count > 0 ? count : null,
+    };
+    return out.distance || out.duration || out.count ? out : null;
+  }
+
+  _calcMultiGoalProgressForActivities(activities, multiGoals) {
+    const mg = multiGoals;
+    if (!mg) return null;
+
+    const currentDistance = (activities || []).reduce((sum, a) => sum + Number(a?.distance || 0), 0);
+    const currentDuration = (activities || []).reduce((sum, a) => sum + Number(a?.duration || 0), 0);
+    const currentCount = (activities || []).length;
+
+    const breakdown = {};
+    const ratios = [];
+
+    if (mg.distance) {
+      const r = mg.distance > 0 ? currentDistance / mg.distance : 0;
+      breakdown.distance = {
+        current: Math.round(currentDistance * 10) / 10,
+        target: mg.distance,
+        completed: Number.isFinite(r) ? r >= 1 : false,
+      };
+      ratios.push(Number.isFinite(r) ? r : 0);
+    }
+    if (mg.duration) {
+      const r = mg.duration > 0 ? currentDuration / mg.duration : 0;
+      breakdown.duration = {
+        current: Math.round(currentDuration * 10) / 10,
+        target: mg.duration,
+        completed: Number.isFinite(r) ? r >= 1 : false,
+      };
+      ratios.push(Number.isFinite(r) ? r : 0);
+    }
+    if (mg.count) {
+      const r = mg.count > 0 ? currentCount / mg.count : 0;
+      breakdown.count = {
+        current: currentCount,
+        target: mg.count,
+        completed: Number.isFinite(r) ? r >= 1 : false,
+      };
+      ratios.push(Number.isFinite(r) ? r : 0);
+    }
+
+    if (!ratios.length) return null;
+    const minRatio = Math.min(...ratios);
+    const clampedRatio = this._clamp(minRatio, 0, 1);
+    const percentage = Math.round(clampedRatio * 100);
+    const allCompleted = ratios.every((r) => r >= 1);
+
+    return { breakdown, minRatio, percentage, allCompleted };
+  }
+
+  _isProgressionPact(challenge) {
+    const legacy = Boolean(challenge && challenge.mode === 'duo' && challenge.goal?.type === 'effort_points');
+    const v1 = Boolean(challenge && challenge.mode === 'duo' && challenge.pactRules === 'progression_7d_v1');
+    return legacy || v1;
   }
 
   _calcEffortPointsForActivities(activities) {
@@ -272,6 +346,8 @@ class ChallengeService {
       // Build data for the new challenge
       const newChallengeData = {
         goal: challenge.goal,
+        multiGoals: challenge.multiGoals,
+        pactRules: challenge.pactRules,
         activityTypes: challenge.activityTypes,
         title: challenge.title,
         icon: challenge.icon,
@@ -366,12 +442,20 @@ class ChallengeService {
     const isExpired = this._isExpired(challenge);
     const isSuccess = this._isSuccess(challenge);
 
-    // Special settlement: 7-day PE pact (DUO) with partial refund + limited advantage.
+    // Special settlement: 7-day progression pact (DUO) with partial refund + limited advantage.
+    // Legacy: goal.type === 'effort_points'
+    // New: pactRules === 'progression_7d_v1' with user-visible multiGoals.
     // IMPORTANT: settle only at expiry to allow progress > 100% (capped at 120% for payout).
-    if (this._isEffortPointsPact(challenge)) {
+    if (this._isProgressionPact(challenge)) {
       if (!isExpired) return challenge;
 
-      const goal = Number(challenge.goal?.value || 35);
+      const isLegacyEffort = Boolean(challenge.goal?.type === 'effort_points');
+
+      // Internal PE goal stays stable.
+      // - Legacy effort_points uses its configured goal.value (default 35)
+      // - New progression_7d_v1 always uses 35 (UI goal is multiGoals)
+      const peGoal = isLegacyEffort ? Number(challenge.goal?.value || 35) : 35;
+      const multiGoals = this._getMultiGoals(challenge);
       const stakePerPlayer = Number(challenge.stakePerPlayer ?? this.STAKE_PER_PLAYER);
       const pot = stakePerPlayer * 2;
 
@@ -398,9 +482,21 @@ class ChallengeService {
         };
         const activities = await Activity.find(activityQuery);
         const peTotal = this._calcEffortPointsForActivities(activities);
-        challenge.players[i].progress = peTotal;
+
         const wasCompleted = Boolean(challenge.players[i].completed);
-        const completed = peTotal >= goal;
+        let completed = false;
+
+        if (isLegacyEffort) {
+          challenge.players[i].progress = peTotal;
+          completed = peGoal > 0 ? peTotal >= peGoal : false;
+          challenge.players[i].multiGoalProgress = null;
+        } else {
+          const mg = this._calcMultiGoalProgressForActivities(activities, multiGoals);
+          challenge.players[i].progress = mg ? mg.percentage : 0;
+          challenge.players[i].multiGoalProgress = mg ? mg.breakdown : null;
+          completed = Boolean(mg && mg.allCompleted);
+        }
+
         challenge.players[i].completed = completed;
         if (!wasCompleted && completed) {
           challenge.players[i].completedAt = now;
@@ -409,12 +505,14 @@ class ChallengeService {
       }
 
       const r = playerTotals.map((p) => {
-        const ri = goal > 0 ? Number(p.peTotal) / goal : 0;
+        const ri = peGoal > 0 ? Number(p.peTotal) / peGoal : 0;
         return Number.isFinite(ri) ? ri : 0;
       });
 
       const rCap = r.map((x) => Math.min(x, 1.2));
-      const bothHitGoal = r.every((x) => x >= 1.0);
+      const bothHitGoal = isLegacyEffort
+        ? r.every((x) => x >= 1.0)
+        : (challenge.players || []).every((pl) => Boolean(pl?.completed));
 
       if (bothHitGoal) {
         const minCap = Math.min(rCap[0] ?? 0, rCap[1] ?? 0);
@@ -454,9 +552,9 @@ class ChallengeService {
         const refund = Math.round(stakePerPlayer * refundRatio);
         await this._refundStakeAmountIfHeld(challenge, pid, refund, {
           kind: 'stake_refund',
-          note: 'Remboursement partiel pacte PE (7 jours)',
+          note: 'Remboursement partiel pacte (7 jours)',
           burnKind: 'stake_burn',
-          burnNote: 'Mise restante brûlée (pacte PE non réussi)',
+          burnNote: 'Mise restante brûlée (pacte non réussi)',
         });
       }
 
@@ -678,7 +776,23 @@ class ChallengeService {
 
   // ⭐ Créer un challenge DUO (avec invitation)
   async createDuoChallenge(creatorId, partnerId, data) {
-    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, perPlayerActivityGoals, recurrence, customGoals } = data;
+    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, perPlayerActivityGoals, recurrence, customGoals, multiGoals, pactRules } = data;
+
+    const normalizeMultiGoals = (mg) => {
+      if (!mg || typeof mg !== 'object') return null;
+      const distance = Number(mg.distance);
+      const duration = Number(mg.duration);
+      const count = Number(mg.count);
+      const out = {
+        distance: Number.isFinite(distance) && distance > 0 ? distance : null,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+        count: Number.isFinite(count) && count > 0 ? count : null,
+      };
+      return out.distance || out.duration || out.count ? out : null;
+    };
+
+    const multiGoalsSafe = normalizeMultiGoals(multiGoals);
+    const pactRulesSafe = pactRules === 'progression_7d_v1' ? 'progression_7d_v1' : 'none';
 
     // ✅ Validation basique
     if (!goal || !goal.type || !goal.value) {
@@ -691,6 +805,17 @@ class ChallengeService {
 
     if (goal.value <= 0) {
       throw new Error('La valeur de l\'objectif doit être positive');
+    }
+
+    // ✅ Progression pact (multi-objectives)
+    if (pactRulesSafe === 'progression_7d_v1') {
+      if (!multiGoalsSafe) {
+        throw new Error('Des sous-objectifs (distance/durée/nombre) sont requis');
+      }
+      const selectedCount = [multiGoalsSafe.distance, multiGoalsSafe.duration, multiGoalsSafe.count].filter((v) => Number(v) > 0).length;
+      if (selectedCount < 2) {
+        throw new Error('Sélectionnez au moins 2 sous-objectifs');
+      }
     }
 
     if (!partnerId) {
@@ -833,6 +958,8 @@ class ChallengeService {
           { user: partnerId, goalValue: partnerGoalValueSafe, progress: 0, diamonds: 0, completed: false }
         ],
         goal,
+        multiGoals: multiGoalsSafe || undefined,
+        pactRules: pactRulesSafe,
         activityTypes,
         title: title || 'Challenge DUO',
         customTitle: customTitle || undefined,
@@ -886,6 +1013,38 @@ class ChallengeService {
       const prevStake = Number(prevChallenge?.stakePerPlayer ?? this.STAKE_PER_PLAYER);
       const nextStake = typeof nextData?.stakePerPlayer === 'number' ? Number(nextData.stakePerPlayer) : prevStake;
 
+      const prevMG = prevChallenge?.multiGoals && typeof prevChallenge.multiGoals === 'object' ? prevChallenge.multiGoals : null;
+      const nextMG = nextData?.multiGoals && typeof nextData.multiGoals === 'object' ? nextData.multiGoals : null;
+
+      const normMG = (mg) => {
+        if (!mg) return null;
+        const d = Number(mg.distance);
+        const u = Number(mg.duration);
+        const c = Number(mg.count);
+        const out = {
+          distance: Number.isFinite(d) && d > 0 ? d : null,
+          duration: Number.isFinite(u) && u > 0 ? u : null,
+          count: Number.isFinite(c) && c > 0 ? c : null,
+        };
+        return out.distance || out.duration || out.count ? out : null;
+      };
+
+      const pmg = normMG(prevMG);
+      const nmg = normMG(nextMG);
+      const mgDecrease = (() => {
+        if (!pmg && !nmg) return false;
+        if (pmg && !nmg) return true;
+        if (!pmg && nmg) return false;
+        const keys = ['distance', 'duration', 'count'];
+        for (const k of keys) {
+          const pv = pmg[k];
+          const nv = nmg[k];
+          if (pv && !nv) return true;
+          if (pv && nv && Number(nv) < Number(pv)) return true;
+        }
+        return false;
+      })();
+
       const stakeDecrease = Number.isFinite(nextStake) && nextStake < prevStake;
       const goalDecrease =
         prevGoal && nextGoal && prevGoal.type === nextGoal.type &&
@@ -895,7 +1054,7 @@ class ChallengeService {
         nextTypes.length < prevTypes.length &&
         nextTypes.every((t) => prevTypes.includes(t));
 
-      return Boolean(stakeDecrease || goalDecrease || typesDecrease);
+      return Boolean(stakeDecrease || goalDecrease || typesDecrease || mgDecrease);
     } catch {
       return false;
     }
@@ -923,6 +1082,35 @@ class ChallengeService {
     }
     if (!data?.activityTypes || data.activityTypes.length === 0) {
       throw new Error('Au moins un type d\'activité est requis');
+    }
+
+    const normalizeMultiGoals = (mg) => {
+      if (!mg || typeof mg !== 'object') return null;
+      const distance = Number(mg.distance);
+      const duration = Number(mg.duration);
+      const count = Number(mg.count);
+      const out = {
+        distance: Number.isFinite(distance) && distance > 0 ? distance : null,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+        count: Number.isFinite(count) && count > 0 ? count : null,
+      };
+      return out.distance || out.duration || out.count ? out : null;
+    };
+
+    const pactRulesNext = data?.pactRules === 'progression_7d_v1'
+      ? 'progression_7d_v1'
+      : (data?.pactRules === 'none' ? 'none' : undefined);
+
+    const multiGoalsNext = data?.multiGoals === null ? null : normalizeMultiGoals(data?.multiGoals);
+
+    if (pactRulesNext === 'progression_7d_v1') {
+      if (!multiGoalsNext) {
+        throw new Error('Des sous-objectifs (distance/durée/nombre) sont requis');
+      }
+      const selectedCount = [multiGoalsNext.distance, multiGoalsNext.duration, multiGoalsNext.count].filter((v) => Number(v) > 0).length;
+      if (selectedCount < 2) {
+        throw new Error('Sélectionnez au moins 2 sous-objectifs');
+      }
     }
 
     // ✅ Validate perActivityGoals if provided (or explicitly cleared)
@@ -965,6 +1153,14 @@ class ChallengeService {
     if (typeof data.icon === 'string' && data.icon.trim()) challenge.icon = data.icon;
     if (typeof data.stakePerPlayer === 'number' && Number.isFinite(data.stakePerPlayer)) {
       challenge.stakePerPlayer = data.stakePerPlayer;
+    }
+
+    // Optional: pact ruleset and multi-goals (can be cleared)
+    if (data.pactRules !== undefined) {
+      challenge.pactRules = pactRulesNext || 'none';
+    }
+    if (data.multiGoals !== undefined) {
+      challenge.multiGoals = multiGoalsNext;
     }
 
     // Optional: per-player asymmetric goals (goal values per user)
@@ -1265,6 +1461,10 @@ class ChallengeService {
 
     const now = new Date();
 
+    const isProgressionPact = this._isProgressionPact(challenge);
+    const isLegacyEffort = Boolean(challenge.goal?.type === 'effort_points');
+    const multiGoals = this._getMultiGoals(challenge);
+
     for (let i = 0; i < challenge.players.length; i++) {
       const player = challenge.players[i];
       const playerId = typeof player.user === 'string' ? player.user : player.user._id;
@@ -1317,7 +1517,7 @@ class ChallengeService {
       // Legacy per-activity goals
       const hasPerActivityGoals = !hasPerPlayerActivityGoals && challenge.perActivityGoals && challenge.perActivityGoals.size > 0;
 
-      const targetValue =
+      let targetValue =
         Number.isFinite(Number(challenge.players[i]?.goalValue)) && Number(challenge.players[i]?.goalValue) > 0
           ? Number(challenge.players[i].goalValue)
           : Number(challenge.goal.value);
@@ -1325,11 +1525,21 @@ class ChallengeService {
       let current = 0;
       let completed = false;
 
-      if (challenge.goal?.type === 'effort_points') {
+      // ✅ New progression pact (multi-objectives visible; internal PE settlement only)
+      if (isProgressionPact && !isLegacyEffort && multiGoals && !hasPerPlayerActivityGoals && !hasPerActivityGoals) {
+        const mg = this._calcMultiGoalProgressForActivities(activities, multiGoals);
+        const pct = mg ? mg.percentage : 0;
+        current = pct;
+        targetValue = 100;
+        completed = Boolean(mg && mg.allCompleted);
+        challenge.players[i].perActivityProgress = undefined;
+        challenge.players[i].multiGoalProgress = mg ? mg.breakdown : null;
+      } else if (challenge.goal?.type === 'effort_points') {
         // Points d'Effort (PE): multi-activités, un score unique.
         current = this._calcEffortPointsForActivities(activities);
         completed = current >= targetValue;
         // No perActivityProgress for this mode.
+        challenge.players[i].multiGoalProgress = null;
       } else if (hasPerPlayerActivityGoals) {
         const perActivityProgress = {};
         const goalsForPlayer = (challenge.perPlayerActivityGoals || {})[String(playerId)] || {};
@@ -1569,6 +1779,35 @@ class ChallengeService {
       throw new Error('Au moins un type d\'activité est requis');
     }
 
+    const normalizeMultiGoals = (mg) => {
+      if (!mg || typeof mg !== 'object') return null;
+      const distance = Number(mg.distance);
+      const duration = Number(mg.duration);
+      const count = Number(mg.count);
+      const out = {
+        distance: Number.isFinite(distance) && distance > 0 ? distance : null,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+        count: Number.isFinite(count) && count > 0 ? count : null,
+      };
+      return out.distance || out.duration || out.count ? out : null;
+    };
+
+    const pactRulesNext = data?.pactRules === 'progression_7d_v1'
+      ? 'progression_7d_v1'
+      : (data?.pactRules === 'none' ? 'none' : undefined);
+
+    const multiGoalsNext = data?.multiGoals === null ? null : normalizeMultiGoals(data?.multiGoals);
+
+    if (pactRulesNext === 'progression_7d_v1') {
+      if (!multiGoalsNext) {
+        throw new Error('Des sous-objectifs (distance/durée/nombre) sont requis');
+      }
+      const selectedCount = [multiGoalsNext.distance, multiGoalsNext.duration, multiGoalsNext.count].filter((v) => Number(v) > 0).length;
+      if (selectedCount < 2) {
+        throw new Error('Sélectionnez au moins 2 sous-objectifs');
+      }
+    }
+
     // Optional per-activity goals (legacy)
     if (data?.perActivityGoals !== undefined && data?.perActivityGoals !== null) {
       const perActivityGoals = data.perActivityGoals;
@@ -1597,6 +1836,14 @@ class ChallengeService {
     challenge.activityTypes = data.activityTypes;
     challenge.title = data.title || challenge.title;
     challenge.icon = data.icon || challenge.icon;
+
+    // Optional: pact ruleset and multi-goals (can be cleared)
+    if (data.pactRules !== undefined) {
+      challenge.pactRules = pactRulesNext || 'none';
+    }
+    if (data.multiGoals !== undefined) {
+      challenge.multiGoals = multiGoalsNext;
+    }
 
     // Optional: custom title (can be cleared)
     if (data.customTitle !== undefined) {

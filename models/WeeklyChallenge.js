@@ -31,6 +31,11 @@ const playerSchema = new mongoose.Schema({
   completedAt: {
     type: Date,
     default: null
+  },
+  // Optional detailed breakdown for multi-goal pacts (distance/duration/count)
+  multiGoalProgress: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
   }
 }, { _id: false });
 
@@ -116,6 +121,22 @@ const weeklyChallengeSchema = new mongoose.Schema({
       required: true,
       min: 0.1
     }
+  },
+
+  // Multi-objectives (visible to user): can combine distance/duration/count.
+  // When present, overall completion requires ALL provided sub-goals.
+  multiGoals: {
+    distance: { type: Number, min: 0, default: null },
+    duration: { type: Number, min: 0, default: null },
+    count: { type: Number, min: 0, default: null },
+  },
+
+  // Pact ruleset selector (keeps logic explicit and avoids exposing effort_points as a UI goal).
+  pactRules: {
+    type: String,
+    enum: ['none', 'progression_7d_v1'],
+    default: 'none',
+    index: true,
   },
   
   activityTypes: {
@@ -319,8 +340,34 @@ weeklyChallengeSchema.index({
 
 // ✅ Virtuals
 weeklyChallengeSchema.virtual('progress').get(function() {
+  const hasMultiGoals = Boolean(
+    this?.multiGoals &&
+    (Number(this.multiGoals.distance) > 0 || Number(this.multiGoals.duration) > 0 || Number(this.multiGoals.count) > 0)
+  );
+
+  const computePct = (player) => {
+    if (!hasMultiGoals) return null;
+    const mg = this.multiGoals || {};
+    const ratios = [];
+    if (Number(mg.distance) > 0) ratios.push((Number(player.progress) || 0) / 100);
+    if (Number(mg.duration) > 0) ratios.push((Number(player.progress) || 0) / 100);
+    if (Number(mg.count) > 0) ratios.push((Number(player.progress) || 0) / 100);
+    if (!ratios.length) return null;
+    const pct = Math.max(0, Math.min(100, Number(player.progress) || 0));
+    return pct;
+  };
+
   if (this.mode === 'solo' && this.players.length > 0) {
     const player = this.players[0];
+    if (hasMultiGoals) {
+      const pct = computePct(player);
+      return {
+        current: Number.isFinite(Number(pct)) ? pct : (player.progress || 0),
+        goal: 100,
+        percentage: Number.isFinite(Number(pct)) ? pct : 0,
+        isCompleted: player.completed
+      };
+    }
     return {
       current: player.progress,
       goal: this.goal.value,
@@ -334,6 +381,15 @@ weeklyChallengeSchema.virtual('progress').get(function() {
       p.user.toString() === this.creator.toString()
     );
     if (creatorPlayer) {
+      if (hasMultiGoals) {
+        const pct = computePct(creatorPlayer);
+        return {
+          current: Number.isFinite(Number(pct)) ? pct : (creatorPlayer.progress || 0),
+          goal: 100,
+          percentage: Number.isFinite(Number(pct)) ? pct : 0,
+          isCompleted: creatorPlayer.completed
+        };
+      }
       return {
         current: creatorPlayer.progress,
         goal: this.goal.value,
@@ -350,6 +406,22 @@ weeklyChallengeSchema.virtual('progress').get(function() {
 weeklyChallengeSchema.methods.getPlayerProgress = function(userId) {
   const player = this.players.find(p => p.user.toString() === userId.toString());
   if (!player) return null;
+
+  const hasMultiGoals = Boolean(
+    this?.multiGoals &&
+    (Number(this.multiGoals.distance) > 0 || Number(this.multiGoals.duration) > 0 || Number(this.multiGoals.count) > 0)
+  );
+
+  if (hasMultiGoals) {
+    const pct = Math.max(0, Math.min(100, Number(player.progress) || 0));
+    return {
+      current: pct,
+      goal: 100,
+      percentage: pct,
+      isCompleted: player.completed,
+      diamonds: player.diamonds
+    };
+  }
   
   return {
     current: player.progress,
