@@ -27,21 +27,21 @@ describe('🛡️ Validation Backend', () => {
   });
 
   describe('Activities - Validation des champs selon le type', () => {
-    test('❌ Devrait rejeter distance pour yoga', async () => {
+    test('❌ Devrait rejeter poolLength pour workout', async () => {
       const res = await request(app)
         .post('/api/activities')
         .set('Authorization', `Bearer ${token}`)
         .send({
-          type: 'yoga',
-          title: 'Yoga session',
+          type: 'workout',
+          title: 'Workout session',
           duration: 45,
-          distance: 10,
+          poolLength: 25,
           date: new Date().toISOString(),
         });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.invalidFields).toContain('distance');
+      expect(res.body.invalidFields).toContain('poolLength');
     });
 
     test('❌ Devrait rejeter poolLength pour running', async () => {

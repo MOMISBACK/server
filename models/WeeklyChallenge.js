@@ -100,12 +100,60 @@ const weeklyChallengeSchema = new mongoose.Schema({
   activityTypes: {
     type: [String],
     required: true,
-    enum: ['running', 'cycling', 'walking', 'swimming', 'yoga', 'workout'],
+    enum: ['running', 'cycling', 'walking', 'swimming', 'workout'],
     validate: {
       validator: function(v) {
         return v.length > 0;
       },
       message: 'Au moins un type d\'activité requis'
+    }
+  },
+  
+  // Custom title (optional, overrides auto-generated title)
+  customTitle: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+    default: null
+  },
+  
+  // Per-activity-type goals (optional, for multi-activity challenges)
+  // Format: { running: { type: 'distance', value: 10 }, workout: { type: 'count', value: 3 } }
+  perActivityGoals: {
+    type: Map,
+    of: {
+      type: {
+        type: String,
+        enum: ['distance', 'duration', 'count', 'reps']
+      },
+      value: {
+        type: Number,
+        min: 0
+      }
+    },
+    default: null
+  },
+  
+  // Auto-renewal configuration
+  recurrence: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    weeksCount: {
+      type: Number,
+      min: 1,
+      max: 52,
+      default: null
+    },
+    weeksCompleted: {
+      type: Number,
+      default: 0
+    },
+    parentChallengeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'WeeklyChallenge',
+      default: null
     }
   },
   

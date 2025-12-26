@@ -145,6 +145,107 @@ class ChallengeService {
     return false;
   }
 
+  // ✅ NEW: Check and handle challenge recurrence (auto-renewal)
+  async _handleRecurrenceIfNeeded(challenge) {
+    if (!challenge?.recurrence?.enabled) return null;
+    if (challenge.recurrence.weeksCompleted >= challenge.recurrence.weeksCount) return null;
+
+    // Only renew completed or successful challenges
+    if (challenge.status !== 'completed' && challenge.settlement?.status !== 'success') {
+      return null;
+    }
+
+    this._log('🔄 Auto-renewing challenge:', {
+      id: challenge._id,
+      mode: challenge.mode,
+      weeksCompleted: challenge.recurrence.weeksCompleted,
+      weeksCount: challenge.recurrence.weeksCount
+    });
+
+    try {
+      // Increment weeks completed on the original challenge
+      challenge.recurrence.weeksCompleted = (challenge.recurrence.weeksCompleted || 0) + 1;
+      await challenge.save();
+
+      // Check if we still have weeks remaining
+      if (challenge.recurrence.weeksCompleted >= challenge.recurrence.weeksCount) {
+        this._log('✅ Recurrence completed, no more renewals');
+        return null;
+      }
+
+      const parentId = challenge.recurrence.parentChallengeId || challenge._id;
+      const creatorId = challenge.creator.toString();
+
+      // Build data for the new challenge
+      const newChallengeData = {
+        goal: challenge.goal,
+        activityTypes: challenge.activityTypes,
+        title: challenge.title,
+        icon: challenge.icon,
+        customTitle: challenge.customTitle,
+        perActivityGoals: challenge.perActivityGoals,
+        recurrence: {
+          enabled: true,
+          weeksCount: challenge.recurrence.weeksCount,
+          weeksCompleted: challenge.recurrence.weeksCompleted,
+          parentChallengeId: parentId
+        }
+      };
+
+      if (challenge.mode === 'solo') {
+        const newChallenge = await this.createSoloChallenge(creatorId, {
+          ...newChallengeData,
+          recurrence: undefined // We'll set it manually
+        });
+
+        // Update recurrence tracking on the new challenge
+        newChallenge.recurrence = {
+          enabled: true,
+          weeksCount: challenge.recurrence.weeksCount,
+          weeksCompleted: challenge.recurrence.weeksCompleted,
+          parentChallengeId: parentId
+        };
+        await newChallenge.save();
+
+        this._log('✅ SOLO challenge renewed:', newChallenge._id);
+        return newChallenge;
+      } else if (challenge.mode === 'duo') {
+        // For DUO, get the partner ID
+        const partnerId = challenge.players
+          .map(p => typeof p.user === 'string' ? p.user : p.user._id?.toString())
+          .find(id => id !== creatorId);
+
+        if (!partnerId) {
+          this._log('❌ Cannot renew DUO: partner not found');
+          return null;
+        }
+
+        const newChallenge = await this.createDuoChallenge(creatorId, partnerId, {
+          ...newChallengeData,
+          recurrence: undefined
+        });
+
+        // Update recurrence tracking on the new challenge
+        newChallenge.recurrence = {
+          enabled: true,
+          weeksCount: challenge.recurrence.weeksCount,
+          weeksCompleted: challenge.recurrence.weeksCompleted,
+          parentChallengeId: parentId
+        };
+        await newChallenge.save();
+
+        this._log('✅ DUO challenge renewed (pending acceptance):', newChallenge._id);
+        return newChallenge;
+      }
+
+      return null;
+    } catch (error) {
+      this._log('❌ Recurrence failed:', error.message);
+      // Non-blocking: don't fail the original settlement
+      return null;
+    }
+  }
+
   async _settleChallengeIfNeeded(challenge, reasonHint) {
     if (!challenge) return challenge;
     if (challenge.settlement?.status && challenge.settlement.status !== 'none') return challenge;
@@ -161,6 +262,10 @@ class ChallengeService {
       challenge.settlement = { status: 'success', reason: 'completed', settledAt: new Date() };
       challenge.status = 'completed';
       await challenge.save();
+
+      // ✅ Handle recurrence after successful completion
+      await this._handleRecurrenceIfNeeded(challenge);
+
       return challenge;
     }
 
@@ -247,7 +352,7 @@ class ChallengeService {
   
   // ⭐ Créer un challenge SOLO
   async createSoloChallenge(userId, data) {
-    const { goal, activityTypes, title, icon } = data;
+    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, recurrence } = data;
 
     // ✅ Validation
     if (!goal || !goal.type || !goal.value) {
@@ -260,6 +365,18 @@ class ChallengeService {
 
     if (goal.value <= 0) {
       throw new Error('La valeur de l\'objectif doit être positive');
+    }
+
+    // ✅ Validate perActivityGoals if provided
+    if (perActivityGoals && Object.keys(perActivityGoals).length > 0) {
+      for (const [type, goalData] of Object.entries(perActivityGoals)) {
+        if (!activityTypes.includes(type)) {
+          throw new Error(`Type d'activité ${type} non sélectionné`);
+        }
+        if (!goalData?.type || !goalData?.value || goalData.value <= 0) {
+          throw new Error(`Objectif invalide pour ${type}`);
+        }
+      }
     }
 
     // ✅ Vérifier que l'utilisateur n'a pas déjà un challenge SOLO actif
@@ -286,6 +403,26 @@ class ChallengeService {
       // ✅ CHANGÉ: Utiliser 7 jours à partir de maintenant (pas la semaine calendaire)
       const { startDate, endDate } = this._calculate7DayChallengeDates();
 
+      // Build perActivityGoals Map if provided
+      let perActivityGoalsMap = undefined;
+      if (perActivityGoals && Object.keys(perActivityGoals).length > 0) {
+        perActivityGoalsMap = new Map();
+        for (const [type, goalData] of Object.entries(perActivityGoals)) {
+          perActivityGoalsMap.set(type, { type: goalData.type, value: goalData.value });
+        }
+      }
+
+      // Build recurrence object if enabled
+      let recurrenceData = undefined;
+      if (recurrence?.enabled && recurrence?.weeksCount > 0) {
+        recurrenceData = {
+          enabled: true,
+          weeksCount: Math.min(52, Math.max(1, recurrence.weeksCount)),
+          weeksCompleted: 0,
+          parentChallengeId: null
+        };
+      }
+
       const challenge = new WeeklyChallenge({
         mode: 'solo',
         creator: userId,
@@ -298,6 +435,9 @@ class ChallengeService {
         goal,
         activityTypes,
         title: title || 'Challenge SOLO',
+        customTitle: customTitle || undefined,
+        perActivityGoals: perActivityGoalsMap,
+        recurrence: recurrenceData,
         icon: icon || 'trophy-outline',
         startDate,
         endDate,
@@ -325,7 +465,7 @@ class ChallengeService {
 
   // ⭐ Créer un challenge DUO (avec invitation)
   async createDuoChallenge(creatorId, partnerId, data) {
-    const { goal, activityTypes, title, icon } = data;
+    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, recurrence } = data;
 
     // ✅ Validation basique
     if (!goal || !goal.type || !goal.value) {
@@ -346,6 +486,18 @@ class ChallengeService {
 
     if (creatorId === partnerId || creatorId.toString() === partnerId.toString()) {
       throw new Error('Vous ne pouvez pas vous inviter vous-même');
+    }
+
+    // ✅ Validate perActivityGoals if provided
+    if (perActivityGoals && Object.keys(perActivityGoals).length > 0) {
+      for (const [type, goalData] of Object.entries(perActivityGoals)) {
+        if (!activityTypes.includes(type)) {
+          throw new Error(`Type d'activité ${type} non sélectionné`);
+        }
+        if (!goalData?.type || !goalData?.value || goalData.value <= 0) {
+          throw new Error(`Objectif invalide pour ${type}`);
+        }
+      }
     }
 
     // ✅ Vérifier que le partenaire existe et est actif
@@ -401,6 +553,26 @@ class ChallengeService {
       throw new Error('Ce partenaire a déjà un challenge en cours ou une invitation en attente');
     }
 
+    // Build perActivityGoals Map if provided
+    let perActivityGoalsMap = undefined;
+    if (perActivityGoals && Object.keys(perActivityGoals).length > 0) {
+      perActivityGoalsMap = new Map();
+      for (const [type, goalData] of Object.entries(perActivityGoals)) {
+        perActivityGoalsMap.set(type, { type: goalData.type, value: goalData.value });
+      }
+    }
+
+    // Build recurrence object if enabled
+    let recurrenceData = undefined;
+    if (recurrence?.enabled && recurrence?.weeksCount > 0) {
+      recurrenceData = {
+        enabled: true,
+        weeksCount: Math.min(52, Math.max(1, recurrence.weeksCount)),
+        weeksCompleted: 0,
+        parentChallengeId: null
+      };
+    }
+
     let staked = false;
     try {
       // Mise en jeu DUO (créateur), remboursée si l'invitation est refusée
@@ -422,6 +594,9 @@ class ChallengeService {
         goal,
         activityTypes,
         title: title || 'Challenge DUO',
+        customTitle: customTitle || undefined,
+        perActivityGoals: perActivityGoalsMap,
+        recurrence: recurrenceData,
         icon: icon || 'people-outline',
         startDate: null,
         endDate: null,
@@ -769,25 +944,80 @@ class ChallengeService {
         }))
       });
 
-      let current = 0;
+      // ✅ NEW: Check if we have per-activity goals
+      const hasPerActivityGoals = challenge.perActivityGoals && challenge.perActivityGoals.size > 0;
 
-      switch (challenge.goal.type) {
-        case 'distance':
-          current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
-          break;
-        case 'duration':
-          current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
-          break;
-        case 'count':
-          current = activities.length;
-          break;
+      let current = 0;
+      let completed = false;
+
+      if (hasPerActivityGoals) {
+        // ✅ Per-activity goals mode: each activity type has its own goal
+        // Progress is calculated as a percentage (0-100) of overall completion
+        let totalGoalsCompleted = 0;
+        let totalGoals = 0;
+        const perActivityProgress = {};
+
+        for (const [activityType, goalData] of challenge.perActivityGoals.entries()) {
+          const typeActivities = activities.filter(a => a.type === activityType);
+          let typeProgress = 0;
+
+          switch (goalData.type) {
+            case 'distance':
+              typeProgress = typeActivities.reduce((sum, a) => sum + (a.distance || 0), 0);
+              break;
+            case 'duration':
+              typeProgress = typeActivities.reduce((sum, a) => sum + (a.duration || 0), 0);
+              break;
+            case 'count':
+              typeProgress = typeActivities.length;
+              break;
+            case 'reps':
+              // For reps, count the total reps from all activities of this type
+              typeProgress = typeActivities.reduce((sum, a) => sum + (a.sets?.reduce((s, set) => s + (set.reps || 0), 0) || 0), 0);
+              break;
+          }
+
+          perActivityProgress[activityType] = {
+            current: typeProgress,
+            target: goalData.value,
+            type: goalData.type,
+            completed: typeProgress >= goalData.value
+          };
+
+          totalGoals++;
+          if (typeProgress >= goalData.value) {
+            totalGoalsCompleted++;
+          }
+        }
+
+        // Store per-activity progress for UI display
+        challenge.players[i].perActivityProgress = perActivityProgress;
+
+        // Overall progress is percentage of goals completed (0-100 scale)
+        // But we use goalValue as total for diamond calculation, so we scale to goalValue
+        const completionRatio = totalGoals > 0 ? totalGoalsCompleted / totalGoals : 0;
+        current = Math.round(completionRatio * challenge.goal.value);
+        completed = totalGoalsCompleted >= totalGoals;
+      } else {
+        // Global goal mode (original behavior)
+        switch (challenge.goal.type) {
+          case 'distance':
+            current = activities.reduce((sum, a) => sum + (a.distance || 0), 0);
+            break;
+          case 'duration':
+            current = activities.reduce((sum, a) => sum + (a.duration || 0), 0);
+            break;
+          case 'count':
+            current = activities.length;
+            break;
+        }
+        completed = current >= challenge.goal.value;
       }
 
       const diamonds = Math.min(
         Math.floor((current / challenge.goal.value) * 4),
         4
       );
-      const completed = current >= challenge.goal.value;
 
       challenge.players[i].progress = current;
       challenge.players[i].diamonds = diamonds;

@@ -18,12 +18,12 @@ describe('🎁 Daily chest', () => {
 
     expect(res1.status).toBe(200);
     expect(res1.body.success).toBe(true);
-    expect(res1.body.data.reward).toBe(1);
+    expect(res1.body.data.reward).toBe(5);
     expect(res1.body.data.dailyChestClaimsToday).toBe(1);
     expect(res1.body.data.claimsRemaining).toBe(2);
 
     const after1 = await User.findById(user._id).select('totalDiamonds dailyChestLastOpenedAt dailyChestClaimDate dailyChestClaimsToday');
-    expect(after1.totalDiamonds).toBe(201);
+    expect(after1.totalDiamonds).toBe(205);
     expect(after1.dailyChestLastOpenedAt).toBeTruthy();
     expect(after1.dailyChestClaimDate).toBeTruthy();
     expect(after1.dailyChestClaimsToday).toBe(1);
@@ -35,7 +35,7 @@ describe('🎁 Daily chest', () => {
 
     expect(res2.status).toBe(200);
     expect(res2.body.success).toBe(true);
-    expect(res2.body.data.reward).toBe(1);
+    expect(res2.body.data.reward).toBe(5);
     expect(res2.body.data.dailyChestClaimsToday).toBe(2);
     expect(res2.body.data.claimsRemaining).toBe(1);
 
@@ -46,7 +46,7 @@ describe('🎁 Daily chest', () => {
 
     expect(res3.status).toBe(200);
     expect(res3.body.success).toBe(true);
-    expect(res3.body.data.reward).toBe(1);
+    expect(res3.body.data.reward).toBe(5);
     expect(res3.body.data.dailyChestClaimsToday).toBe(3);
     expect(res3.body.data.claimsRemaining).toBe(0);
 
@@ -59,7 +59,8 @@ describe('🎁 Daily chest', () => {
     expect(res4.body.success).toBe(false);
     expect(res4.body.data.claimsRemaining).toBe(0);
 
+    // 200 initial + 3 claims * 5 diamonds = 215
     const after2 = await User.findById(user._id).select('totalDiamonds');
-    expect(after2.totalDiamonds).toBe(203);
+    expect(after2.totalDiamonds).toBe(215);
   });
 });

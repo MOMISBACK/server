@@ -4,14 +4,14 @@ const { body, validationResult } = require('express-validator');
 
 /**
  * Configuration des champs autorisés par type d'activité
+ * Inclut les champs enrichis importés depuis Health Connect / Apple Health
  */
 const ALLOWED_FIELDS = {
-  running: ['distance', 'elevationGain', 'avgSpeed'],
-  cycling: ['distance', 'elevationGain', 'avgSpeed'],
-  walking: ['distance'],
-  swimming: ['distance', 'poolLength', 'laps'],
-  workout: ['exercises'],
-  yoga: [], // Pas de champs spécifiques
+  running: ['distance', 'elevationGain', 'avgSpeed', 'calories', 'heartRateAvg', 'heartRateMax', 'steps', 'importNotes'],
+  cycling: ['distance', 'elevationGain', 'avgSpeed', 'calories', 'heartRateAvg', 'heartRateMax', 'importNotes'],
+  walking: ['distance', 'calories', 'heartRateAvg', 'heartRateMax', 'steps', 'importNotes'],
+  swimming: ['distance', 'poolLength', 'laps', 'calories', 'heartRateAvg', 'heartRateMax', 'importNotes'],
+  workout: ['exercises', 'calories', 'heartRateAvg', 'heartRateMax', 'importNotes'],
 };
 
 /**
@@ -52,7 +52,7 @@ const validateActivityFields = (req, res, next) => {
 const commonValidation = [
   body('type')
     .notEmpty().withMessage('Le type est obligatoire')
-    .isIn(['running', 'cycling', 'walking', 'swimming', 'workout', 'yoga'])
+    .isIn(['running', 'cycling', 'walking', 'swimming', 'workout'])
     .withMessage('Type d\'activité invalide'),
   
   body('title')
@@ -170,6 +170,38 @@ const workoutValidation = [
 ];
 
 /**
+ * Règles pour les données enrichies (import santé)
+ * Ces champs sont optionnels et proviennent des imports Health Connect / Apple Health
+ */
+const enrichedDataValidation = [
+  body('calories')
+    .optional()
+    .isFloat({ min: 0, max: 50000 })
+    .withMessage('Les calories doivent être entre 0 et 50000 kcal'),
+  
+  body('heartRateAvg')
+    .optional()
+    .isInt({ min: 30, max: 250 })
+    .withMessage('La fréquence cardiaque moyenne doit être entre 30 et 250 bpm'),
+  
+  body('heartRateMax')
+    .optional()
+    .isInt({ min: 30, max: 250 })
+    .withMessage('La fréquence cardiaque max doit être entre 30 et 250 bpm'),
+  
+  body('steps')
+    .optional()
+    .isInt({ min: 0, max: 500000 })
+    .withMessage('Le nombre de pas doit être entre 0 et 500000'),
+  
+  body('importNotes')
+    .optional()
+    .isString()
+    .isLength({ max: 200 })
+    .withMessage('Les notes d\'import ne doivent pas dépasser 200 caractères'),
+];
+
+/**
  * Middleware pour gérer les erreurs de validation
  */
 const handleValidationErrors = (req, res, next) => {
@@ -201,6 +233,7 @@ const validateCreateActivity = [
   ...distanceValidation,
   ...swimmingValidation,
   ...workoutValidation,
+  ...enrichedDataValidation,
   handleValidationErrors,
 ];
 

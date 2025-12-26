@@ -36,7 +36,7 @@ const activitySchema = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    enum: ['cycling', 'running', 'walking', 'swimming', 'workout', 'yoga'],
+    enum: ['cycling', 'running', 'walking', 'swimming', 'workout'],
   },
   startTime: {
     type: Date,
@@ -96,6 +96,32 @@ const activitySchema = new mongoose.Schema({
   // Pour workout
   exercises: [exerciseSchema],
 
+  // --- Données enrichies (import santé) ---
+  // Ces champs sont optionnels et peuplés par les imports Health Connect / Apple Health
+  calories: { // kcal brûlées
+    type: Number,
+    min: 0,
+  },
+  heartRateAvg: { // bpm moyen
+    type: Number,
+    min: 0,
+    max: 300,
+  },
+  heartRateMax: { // bpm max
+    type: Number,
+    min: 0,
+    max: 300,
+  },
+  steps: { // nombre de pas
+    type: Number,
+    min: 0,
+  },
+  importNotes: { // notes d'import (ex: app source, device)
+    type: String,
+    trim: true,
+    maxlength: 200,
+  },
+
   // Réactions (visibles par les 2 joueurs)
   // Map: { [userId]: 'like' | 'love' | 'fire' }
   reactions: {
@@ -125,12 +151,11 @@ activitySchema.index(
 );
 
 const allowedFieldsByType = {
-  running: ['distance', 'elevationGain', 'avgSpeed'],
-  cycling: ['distance', 'elevationGain', 'avgSpeed'],
-  walking: ['distance'],
-  swimming: ['distance', 'poolLength', 'laps'],
-  workout: ['exercises'],
-  yoga: [],
+  running: ['distance', 'elevationGain', 'avgSpeed', 'calories', 'heartRateAvg', 'heartRateMax', 'steps', 'importNotes'],
+  cycling: ['distance', 'elevationGain', 'avgSpeed', 'calories', 'heartRateAvg', 'heartRateMax', 'importNotes'],
+  walking: ['distance', 'calories', 'heartRateAvg', 'heartRateMax', 'steps', 'importNotes'],
+  swimming: ['distance', 'poolLength', 'laps', 'calories', 'heartRateAvg', 'heartRateMax', 'importNotes'],
+  workout: ['exercises', 'calories', 'heartRateAvg', 'heartRateMax', 'importNotes'],
 };
 
 // Middleware de pré-validation pour nettoyer les données (synchrone)

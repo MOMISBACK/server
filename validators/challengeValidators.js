@@ -3,10 +3,10 @@ const { body, validationResult } = require('express-validator');
 const validateCreateChallenge = [
   body('activityTypes')
     .notEmpty().withMessage('Les types d\'activité sont obligatoires')
-    .isArray({ min: 1, max: 6 })
-    .withMessage('Sélectionnez entre 1 et 6 types d\'activité')
+    .isArray({ min: 1, max: 5 })
+    .withMessage('Sélectionnez entre 1 et 5 types d\'activité')
     .custom((types) => {
-      const validTypes = ['running', 'cycling', 'walking', 'swimming', 'workout', 'yoga'];
+      const validTypes = ['running', 'cycling', 'walking', 'swimming', 'workout'];
       const invalidTypes = types.filter(type => !validTypes.includes(type));
       if (invalidTypes.length > 0) {
         throw new Error(`Types invalides : ${invalidTypes.join(', ')}`);

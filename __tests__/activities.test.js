@@ -94,19 +94,19 @@ describe('🏃 Activities API', () => {
       expect(res.status).toBe(400);
     });
 
-    test('✅ Devrait accepter une activité yoga sans distance', async () => {
+    test('✅ Devrait accepter une activité workout sans distance', async () => {
       const res = await request(app)
         .post('/api/activities')
         .set('Authorization', `Bearer ${token}`)
         .send({
-          type: 'yoga',
-          title: 'Séance yoga',
+          type: 'workout',
+          title: 'Séance workout',
           duration: 45,
           date: new Date().toISOString(),
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.type).toBe('yoga');
+      expect(res.body.type).toBe('workout');
       expect(res.body.duration).toBe(45);
     });
 

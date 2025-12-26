@@ -313,15 +313,46 @@ const acceptPartnerInvite = async ({ inviteId, userId }) => {
   }
 
   // ✅ Also confirm on recipient side (so they can use the slot for DUO challenges)
+  // IMPORTANT: Le slot de l'invitation est celui du SENDER. Pour le recipient, on doit
+  // trouver un slot libre (p1 ou p2) car il peut déjà avoir quelqu'un sur le même slot.
   const recipient = await User.findById(invite.toUser);
   if (recipient) {
-    const existing = (recipient.partnerLinks || []).find((l) => l.slot === invite.slot);
-    if (existing?.partnerId && existing.partnerId.toString() !== invite.fromUser.toString()) {
-      throw new Error('Ce slot est déjà utilisé sur votre compte');
+    const recipientLinks = recipient.partnerLinks || [];
+    
+    // Vérifier si le sender est déjà lié au recipient sur un autre slot
+    const existingLinkWithSender = recipientLinks.find((l) => 
+      l.partnerId && l.partnerId.toString() === invite.fromUser.toString()
+    );
+    if (existingLinkWithSender) {
+      // Mettre à jour le statut existant
+      recipient.partnerLinks = recipientLinks.map((l) => {
+        if (l.partnerId && l.partnerId.toString() === invite.fromUser.toString()) {
+          return { ...l.toObject(), status: 'confirmed' };
+        }
+        return l;
+      });
+    } else {
+      // Trouver un slot libre pour le recipient
+      const p1Taken = recipientLinks.find((l) => l.slot === 'p1' && l.partnerId && l.status !== 'cancelled');
+      const p2Taken = recipientLinks.find((l) => l.slot === 'p2' && l.partnerId && l.status !== 'cancelled');
+      
+      let recipientSlot = null;
+      if (!p1Taken) {
+        recipientSlot = 'p1';
+      } else if (!p2Taken) {
+        recipientSlot = 'p2';
+      } else {
+        throw new Error('Vous avez déjà deux partenaires actifs (P1 et P2). Libérez un slot pour accepter.');
+      }
+      
+      // Ajouter le nouveau lien sur le slot disponible
+      recipient.partnerLinks = recipientLinks.filter((l) => l.slot !== recipientSlot);
+      recipient.partnerLinks.push({ 
+        slot: recipientSlot, 
+        partnerId: invite.fromUser, 
+        status: 'confirmed' 
+      });
     }
-
-    recipient.partnerLinks = (recipient.partnerLinks || []).filter((l) => l.slot !== invite.slot);
-    recipient.partnerLinks.push({ slot: invite.slot, partnerId: invite.fromUser, status: 'confirmed' });
     await recipient.save();
   }
 
