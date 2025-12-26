@@ -184,6 +184,7 @@ class ChallengeService {
         icon: challenge.icon,
         customTitle: challenge.customTitle,
         perActivityGoals: challenge.perActivityGoals,
+        perPlayerActivityGoals: challenge.perPlayerActivityGoals,
         recurrence: {
           enabled: true,
           weeksCount: challenge.recurrence.weeksCount,
@@ -191,6 +192,25 @@ class ChallengeService {
           parentChallengeId: parentId
         }
       };
+
+      // Preserve asymmetric global goals if they exist
+      try {
+        const players = Array.isArray(challenge.players) ? challenge.players : [];
+        const cg = {};
+        let hasAny = false;
+        for (const p of players) {
+          const pid = typeof p.user === 'string' ? p.user : p.user?._id;
+          if (!pid) continue;
+          const v = Number(p.goalValue);
+          if (Number.isFinite(v) && v > 0) {
+            cg[String(pid)] = v;
+            hasAny = true;
+          }
+        }
+        if (hasAny) newChallengeData.customGoals = cg;
+      } catch (_) {
+        // best-effort
+      }
 
       if (challenge.mode === 'solo') {
         const newChallenge = await this.createSoloChallenge(creatorId, {
@@ -465,7 +485,7 @@ class ChallengeService {
 
   // ⭐ Créer un challenge DUO (avec invitation)
   async createDuoChallenge(creatorId, partnerId, data) {
-    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, recurrence, customGoals } = data;
+    const { goal, activityTypes, title, icon, customTitle, perActivityGoals, perPlayerActivityGoals, recurrence, customGoals } = data;
 
     // ✅ Validation basique
     if (!goal || !goal.type || !goal.value) {
@@ -496,6 +516,24 @@ class ChallengeService {
         }
         if (!goalData?.type || !goalData?.value || goalData.value <= 0) {
           throw new Error(`Objectif invalide pour ${type}`);
+        }
+      }
+    }
+
+    // ✅ Validate perPlayerActivityGoals if provided
+    let perPlayerActivityGoalsSafe = null;
+    if (perPlayerActivityGoals && typeof perPlayerActivityGoals === 'object' && Object.keys(perPlayerActivityGoals).length > 0) {
+      const playerIds = [String(creatorId), String(partnerId)];
+      this._validatePerPlayerActivityGoals(perPlayerActivityGoals, activityTypes, playerIds);
+      perPlayerActivityGoalsSafe = {};
+      for (const pid of playerIds) {
+        perPlayerActivityGoalsSafe[pid] = {};
+        for (const activityType of activityTypes) {
+          const goalData = perPlayerActivityGoals[pid][activityType];
+          perPlayerActivityGoalsSafe[pid][activityType] = {
+            type: goalData.type,
+            value: Number(goalData.value),
+          };
         }
       }
     }
@@ -555,7 +593,7 @@ class ChallengeService {
 
     // Build perActivityGoals Map if provided
     let perActivityGoalsMap = undefined;
-    if (perActivityGoals && Object.keys(perActivityGoals).length > 0) {
+    if (!perPlayerActivityGoalsSafe && perActivityGoals && Object.keys(perActivityGoals).length > 0) {
       perActivityGoalsMap = new Map();
       for (const [type, goalData] of Object.entries(perActivityGoals)) {
         perActivityGoalsMap.set(type, { type: goalData.type, value: goalData.value });
@@ -605,7 +643,8 @@ class ChallengeService {
         activityTypes,
         title: title || 'Challenge DUO',
         customTitle: customTitle || undefined,
-        perActivityGoals: perActivityGoalsMap,
+        perActivityGoals: perPlayerActivityGoalsSafe ? null : perActivityGoalsMap,
+        perPlayerActivityGoals: perPlayerActivityGoalsSafe || undefined,
         recurrence: recurrenceData,
         icon: icon || 'people-outline',
         startDate: null,
@@ -709,6 +748,15 @@ class ChallengeService {
       }
     }
 
+    // ✅ Validate perPlayerActivityGoals if provided (or explicitly cleared)
+    if (data?.perPlayerActivityGoals !== undefined && data?.perPlayerActivityGoals !== null) {
+      const ppg = data.perPlayerActivityGoals;
+      const playerIds = Array.isArray(challenge.players)
+        ? challenge.players.map((p) => String(p.user))
+        : [];
+      this._validatePerPlayerActivityGoals(ppg, data.activityTypes, playerIds);
+    }
+
     const isDecrease = this._isDecreaseProposal(challenge, data);
     if (isDecrease) {
       await this._debitDiamondsOrThrow(userId, FEE_DECREASE, {
@@ -770,6 +818,30 @@ class ChallengeService {
           }
           challenge.perActivityGoals = perActivityGoalsMap;
         }
+      }
+    }
+
+    // Optional: per-player per-activity goals (can be cleared)
+    if (data.perPlayerActivityGoals !== undefined) {
+      if (data.perPlayerActivityGoals === null) {
+        challenge.perPlayerActivityGoals = null;
+      } else {
+        const playerIds = Array.isArray(challenge.players)
+          ? challenge.players.map((p) => String(p.user))
+          : [];
+        const safe = {};
+        for (const pid of playerIds) {
+          safe[pid] = {};
+          for (const activityType of challenge.activityTypes || []) {
+            const goalData = data.perPlayerActivityGoals?.[pid]?.[activityType];
+            if (goalData) {
+              safe[pid][activityType] = { type: goalData.type, value: Number(goalData.value) };
+            }
+          }
+        }
+        challenge.perPlayerActivityGoals = safe;
+        // Ensure legacy perActivityGoals doesn't conflict
+        challenge.perActivityGoals = null;
       }
     }
 
@@ -1042,8 +1114,15 @@ class ChallengeService {
         }))
       });
 
-      // ✅ NEW: Check if we have per-activity goals
-      const hasPerActivityGoals = challenge.perActivityGoals && challenge.perActivityGoals.size > 0;
+      // ✅ NEW: Check if we have per-player per-activity goals (takes precedence)
+      const hasPerPlayerActivityGoals =
+        challenge.perPlayerActivityGoals &&
+        typeof challenge.perPlayerActivityGoals === 'object' &&
+        !Array.isArray(challenge.perPlayerActivityGoals) &&
+        Object.keys(challenge.perPlayerActivityGoals).length > 0;
+
+      // Legacy per-activity goals
+      const hasPerActivityGoals = !hasPerPlayerActivityGoals && challenge.perActivityGoals && challenge.perActivityGoals.size > 0;
 
       const targetValue =
         Number.isFinite(Number(challenge.players[i]?.goalValue)) && Number(challenge.players[i]?.goalValue) > 0
@@ -1053,7 +1132,58 @@ class ChallengeService {
       let current = 0;
       let completed = false;
 
-      if (hasPerActivityGoals) {
+      if (hasPerPlayerActivityGoals) {
+        const perActivityProgress = {};
+        const goalsForPlayer = (challenge.perPlayerActivityGoals || {})[String(playerId)] || {};
+        const entries = Object.entries(goalsForPlayer);
+
+        let totalGoalsCompleted = 0;
+        let totalGoals = 0;
+
+        for (const [activityType, goalData] of entries) {
+          if (!challenge.activityTypes.includes(activityType)) continue;
+
+          const typeActivities = activities.filter(a => a.type === activityType);
+          let typeProgress = 0;
+
+          switch (goalData.type) {
+            case 'distance':
+              typeProgress = typeActivities.reduce((sum, a) => sum + (a.distance || 0), 0);
+              break;
+            case 'duration':
+              typeProgress = typeActivities.reduce((sum, a) => sum + (a.duration || 0), 0);
+              break;
+            case 'count':
+              typeProgress = typeActivities.length;
+              break;
+            case 'reps':
+              typeProgress = typeActivities.reduce(
+                (sum, a) => sum + (a.sets?.reduce((s, set) => s + (set.reps || 0), 0) || 0),
+                0
+              );
+              break;
+          }
+
+          const target = Number(goalData.value);
+          perActivityProgress[activityType] = {
+            current: typeProgress,
+            target,
+            type: goalData.type,
+            completed: Number.isFinite(target) && target > 0 ? typeProgress >= target : false
+          };
+
+          totalGoals++;
+          if (Number.isFinite(target) && target > 0 && typeProgress >= target) {
+            totalGoalsCompleted++;
+          }
+        }
+
+        challenge.players[i].perActivityProgress = perActivityProgress;
+
+        const completionRatio = totalGoals > 0 ? totalGoalsCompleted / totalGoals : 0;
+        current = Math.round(completionRatio * targetValue);
+        completed = totalGoals > 0 && totalGoalsCompleted >= totalGoals;
+      } else if (hasPerActivityGoals) {
         // ✅ Per-activity goals mode: each activity type has its own goal
         // Progress is calculated as a percentage (0-100) of overall completion
         let totalGoalsCompleted = 0;
@@ -1241,10 +1371,105 @@ class ChallengeService {
       throw new Error('Au moins un type d\'activité est requis');
     }
 
+    // Optional per-activity goals (legacy)
+    if (data?.perActivityGoals !== undefined && data?.perActivityGoals !== null) {
+      const perActivityGoals = data.perActivityGoals;
+      if (typeof perActivityGoals !== 'object') {
+        throw new Error('Objectifs par activité invalides');
+      }
+      for (const [type, goalData] of Object.entries(perActivityGoals)) {
+        if (!data.activityTypes.includes(type)) {
+          throw new Error(`Type d'activité ${type} non sélectionné`);
+        }
+        if (!goalData?.type || !goalData?.value || goalData.value <= 0) {
+          throw new Error(`Objectif invalide pour ${type}`);
+        }
+      }
+    }
+
+    // Optional per-player per-activity goals
+    if (data?.perPlayerActivityGoals !== undefined && data?.perPlayerActivityGoals !== null) {
+      const playerIds = Array.isArray(challenge.players)
+        ? challenge.players.map((p) => String(p.user))
+        : [];
+      this._validatePerPlayerActivityGoals(data.perPlayerActivityGoals, data.activityTypes, playerIds);
+    }
+
     challenge.goal = data.goal;
     challenge.activityTypes = data.activityTypes;
     challenge.title = data.title || challenge.title;
     challenge.icon = data.icon || challenge.icon;
+
+    // Optional: custom title (can be cleared)
+    if (data.customTitle !== undefined) {
+      if (data.customTitle === null) {
+        challenge.customTitle = null;
+      } else if (typeof data.customTitle === 'string') {
+        const ct = data.customTitle.trim();
+        challenge.customTitle = ct ? ct : null;
+      }
+    }
+
+    // Optional: per-player asymmetric goals (goal values per user)
+    if (data?.customGoals !== undefined) {
+      const cg = data.customGoals;
+      if (cg && typeof cg === 'object') {
+        for (const pl of challenge.players) {
+          const uid = String(pl.user);
+          const v = Number(cg[uid]);
+          pl.goalValue = Number.isFinite(v) && v > 0 ? v : null;
+        }
+      } else if (cg === null) {
+        for (const pl of challenge.players) {
+          pl.goalValue = null;
+        }
+      }
+    }
+
+    // Optional: per-activity goals (can be cleared)
+    if (data.perActivityGoals !== undefined) {
+      if (data.perActivityGoals === null) {
+        challenge.perActivityGoals = null;
+      } else {
+        const keys = data.perActivityGoals && typeof data.perActivityGoals === 'object'
+          ? Object.keys(data.perActivityGoals)
+          : [];
+
+        if (!keys.length) {
+          challenge.perActivityGoals = null;
+        } else {
+          const perActivityGoalsMap = new Map();
+          for (const [type, goalData] of Object.entries(data.perActivityGoals)) {
+            perActivityGoalsMap.set(type, { type: goalData.type, value: goalData.value });
+          }
+          challenge.perActivityGoals = perActivityGoalsMap;
+        }
+      }
+    }
+
+    // Optional: per-player per-activity goals (can be cleared)
+    if (data.perPlayerActivityGoals !== undefined) {
+      if (data.perPlayerActivityGoals === null) {
+        challenge.perPlayerActivityGoals = null;
+      } else {
+        const playerIds = Array.isArray(challenge.players)
+          ? challenge.players.map((p) => String(p.user))
+          : [];
+        const safe = {};
+        for (const pid of playerIds) {
+          safe[pid] = {};
+          for (const activityType of challenge.activityTypes || []) {
+            const goalData = data.perPlayerActivityGoals?.[pid]?.[activityType];
+            if (goalData) {
+              safe[pid][activityType] = { type: goalData.type, value: Number(goalData.value) };
+            }
+          }
+        }
+        challenge.perPlayerActivityGoals = safe;
+        // Ensure legacy perActivityGoals doesn't conflict
+        challenge.perActivityGoals = null;
+      }
+    }
 
     challenge.players.forEach(player => {
       player.progress = 0;
@@ -1452,6 +1677,43 @@ class ChallengeService {
     });
 
     return { startDate, endDate };
+  }
+
+  _validatePerPlayerActivityGoals(perPlayerActivityGoals, activityTypes, playerIds) {
+    if (!perPlayerActivityGoals || typeof perPlayerActivityGoals !== 'object' || Array.isArray(perPlayerActivityGoals)) {
+      throw new Error('Objectifs par activité (par joueur) invalides');
+    }
+
+    const allowedGoalTypes = new Set(['distance', 'duration', 'count', 'reps']);
+    const types = Array.isArray(activityTypes) ? activityTypes : [];
+    const ids = Array.isArray(playerIds) ? playerIds.map(String) : [];
+
+    for (const pid of ids) {
+      const goalsForPlayer = perPlayerActivityGoals[pid];
+      if (!goalsForPlayer || typeof goalsForPlayer !== 'object' || Array.isArray(goalsForPlayer)) {
+        throw new Error('Objectifs par activité (par joueur) incomplets');
+      }
+
+      for (const activityType of types) {
+        const goalData = goalsForPlayer[activityType];
+        if (!goalData) {
+          throw new Error(`Objectif manquant pour ${activityType}`);
+        }
+        if (!allowedGoalTypes.has(goalData.type)) {
+          throw new Error(`Type d'objectif invalide pour ${activityType}`);
+        }
+        const value = Number(goalData.value);
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error(`Objectif invalide pour ${activityType}`);
+        }
+      }
+
+      for (const k of Object.keys(goalsForPlayer)) {
+        if (!types.includes(k)) {
+          throw new Error(`Type d'activité ${k} non sélectionné`);
+        }
+      }
+    }
   }
 }
 

@@ -139,6 +139,18 @@ const weeklyChallengeSchema = new mongoose.Schema({
     },
     default: null
   },
+
+  // Per-player per-activity-type goals (optional, for asymmetrical DUO goals)
+  // Format:
+  // {
+  //   "<userIdA>": { running: { type: 'distance', value: 10 }, workout: { type: 'count', value: 3 } },
+  //   "<userIdB>": { running: { type: 'distance', value: 5 },  workout: { type: 'count', value: 1 } }
+  // }
+  // Stored as Mixed; validated/sanitized in the service layer.
+  perPlayerActivityGoals: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
   
   // Auto-renewal configuration
   recurrence: {
