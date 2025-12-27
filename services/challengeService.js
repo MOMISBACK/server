@@ -6,292 +6,119 @@ const Activity = require('../models/Activity');
 const User = require('../models/User');
 const DiamondTransaction = require('../models/DiamondTransaction');
 
+// Import extracted modules
+const diamondManager = require('./challenge/diamondManager');
+const helpers = require('./challenge/helpers');
+
 class ChallengeService {
 
-  STAKE_PER_PLAYER = 10;
-  STAKE_PAYOUT_MULTIPLIER = 4;
+  STAKE_PER_PLAYER = diamondManager.STAKE_PER_PLAYER;
+  STAKE_PAYOUT_MULTIPLIER = diamondManager.STAKE_PAYOUT_MULTIPLIER;
 
   _log(...args) {
     if (process.env.NODE_ENV === 'test') return;
     console.log(...args);
   }
 
-  async _recordDiamondTx({ userId, amount, kind, refId, note }) {
-    try {
-      await DiamondTransaction.create({
-        user: userId,
-        amount,
-        kind,
-        refId,
-        note,
-      });
-    } catch (_) {
-      // Non-blocking: never fail the main flow because of auditing.
-    }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DIAMOND OPERATIONS - Delegated to diamondManager module
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async _recordDiamondTx(params) {
+    return diamondManager.recordDiamondTx(params);
   }
 
   async _debitDiamondsOrThrow(userId, amount, meta = {}) {
-    if (!amount || amount <= 0) return;
-
-    const res = await User.updateOne(
-      { _id: userId, totalDiamonds: { $gte: amount } },
-      { $inc: { totalDiamonds: -amount } }
-    );
-
-    if (!res || res.modifiedCount !== 1) {
-      throw new Error('Diamants insuffisants');
-    }
-
-    await this._recordDiamondTx({
-      userId,
-      amount: -amount,
-      kind: meta.kind || 'other',
-      refId: meta.refId,
-      note: meta.note,
-    });
+    return diamondManager.debitDiamondsOrThrow(userId, amount, meta);
   }
 
   async _creditDiamonds(userId, amount, meta = {}) {
-    if (!amount || amount <= 0) return;
-    await User.updateOne({ _id: userId }, { $inc: { totalDiamonds: amount } });
-    await this._recordDiamondTx({
-      userId,
-      amount,
-      kind: meta.kind || 'other',
-      refId: meta.refId,
-      note: meta.note,
-    });
+    return diamondManager.creditDiamonds(userId, amount, meta);
   }
 
   _getStakeEntry(challenge, userId) {
-    const stakes = Array.isArray(challenge?.stakes) ? challenge.stakes : [];
-    return stakes.find((s) => s?.user?.toString?.() === userId.toString());
+    return diamondManager.getStakeEntry(challenge, userId);
   }
 
   async _holdStakeOrThrow(challenge, userId, amount) {
-    const existing = this._getStakeEntry(challenge, userId);
-    if (existing && existing.status === 'held') return;
-
-    await this._debitDiamondsOrThrow(userId, amount, {
-      kind: 'stake_hold',
-      refId: challenge?._id,
-      note: 'Mise en jeu',
-    });
-
-    const stakes = Array.isArray(challenge.stakes) ? challenge.stakes : [];
-    const next = stakes.filter((s) => s?.user?.toString?.() !== userId.toString());
-    next.push({ user: userId, amount, status: 'held', updatedAt: new Date() });
-    challenge.stakes = next;
-    challenge.stakePerPlayer = amount;
+    return diamondManager.holdStakeOrThrow(challenge, userId, amount);
   }
 
   async _refundStakeIfHeld(challenge, userId) {
-    const entry = this._getStakeEntry(challenge, userId);
-    if (!entry || entry.status !== 'held') return;
-
-    await this._creditDiamonds(userId, entry.amount, {
-      kind: 'stake_refund',
-      refId: challenge?._id,
-      note: 'Remboursement de mise',
-    });
-
-    entry.status = 'refunded';
-    entry.updatedAt = new Date();
+    return diamondManager.refundStakeIfHeld(challenge, userId);
   }
 
   _burnStakeIfHeld(challenge, userId) {
-    const entry = this._getStakeEntry(challenge, userId);
-    if (!entry || entry.status !== 'held') return;
-    entry.status = 'burned';
-    entry.updatedAt = new Date();
+    return diamondManager.burnStakeIfHeld(challenge, userId);
   }
 
   async _payoutStakeIfHeld(challenge, userId, multiplier) {
-    const entry = this._getStakeEntry(challenge, userId);
-    if (!entry || entry.status !== 'held') return;
-
-    const payout = entry.amount * multiplier;
-    await this._creditDiamonds(userId, payout, {
-      kind: 'stake_payout',
-      refId: challenge?._id,
-      note: `Gain pacte x${multiplier}`,
-    });
-
-    entry.status = 'paid';
-    entry.updatedAt = new Date();
+    return diamondManager.payoutStakeIfHeld(challenge, userId, multiplier);
   }
 
   async _payoutStakeAmountIfHeld(challenge, userId, amount, meta = {}) {
-    const entry = this._getStakeEntry(challenge, userId);
-    if (!entry || entry.status !== 'held') return;
-
-    const payout = Number(amount);
-    if (!Number.isFinite(payout) || payout < 0) return;
-
-    await this._creditDiamonds(userId, payout, {
-      kind: meta.kind || 'stake_payout',
-      refId: challenge?._id,
-      note: meta.note || 'Gain pacte',
-    });
-
-    entry.status = 'paid';
-    entry.paidAmount = payout;
-    entry.updatedAt = new Date();
+    return diamondManager.payoutStakeAmountIfHeld(challenge, userId, amount, meta);
   }
 
   async _refundStakeAmountIfHeld(challenge, userId, amount, meta = {}) {
-    const entry = this._getStakeEntry(challenge, userId);
-    if (!entry || entry.status !== 'held') return;
-
-    const refund = Number(amount);
-    if (!Number.isFinite(refund) || refund < 0) return;
-
-    const safeRefund = Math.min(refund, Number(entry.amount) || 0);
-    if (safeRefund > 0) {
-      await this._creditDiamonds(userId, safeRefund, {
-        kind: meta.kind || 'stake_refund',
-        refId: challenge?._id,
-        note: meta.note || 'Remboursement de mise',
-      });
-    }
-
-    const burned = Math.max(0, (Number(entry.amount) || 0) - safeRefund);
-    if (burned > 0) {
-      await this._recordDiamondTx({
-        userId,
-        amount: 0,
-        kind: meta.burnKind || 'stake_burn',
-        refId: challenge?._id,
-        note: meta.burnNote || 'Mise brûlée',
-      });
-    }
-
-    entry.status = safeRefund > 0 ? 'refunded' : 'burned';
-    entry.refundedAmount = safeRefund;
-    entry.burnedAmount = burned;
-    entry.updatedAt = new Date();
+    return diamondManager.refundStakeAmountIfHeld(challenge, userId, amount, meta);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HELPER FUNCTIONS - Delegated to helpers module
+  // ═══════════════════════════════════════════════════════════════════════════
+
   _clamp(x, min, max) {
-    const n = Number(x);
-    if (!Number.isFinite(n)) return min;
-    return Math.max(min, Math.min(max, n));
+    return helpers.clamp(x, min, max);
   }
 
   _hasMultiGoals(challenge) {
-    const mg = challenge?.multiGoals;
-    if (!mg || typeof mg !== 'object') return false;
-    return Boolean(
-      (Number(mg.distance) > 0) ||
-      (Number(mg.duration) > 0) ||
-      (Number(mg.count) > 0)
-    );
+    return helpers.hasMultiGoals(challenge);
   }
 
   _getMultiGoals(challenge) {
-    const mg = challenge?.multiGoals;
-    if (!mg || typeof mg !== 'object') return null;
-    const distance = Number(mg.distance);
-    const duration = Number(mg.duration);
-    const count = Number(mg.count);
-    const out = {
-      distance: Number.isFinite(distance) && distance > 0 ? distance : null,
-      duration: Number.isFinite(duration) && duration > 0 ? duration : null,
-      count: Number.isFinite(count) && count > 0 ? count : null,
-    };
-    return out.distance || out.duration || out.count ? out : null;
+    return helpers.getMultiGoals(challenge);
   }
 
   _calcMultiGoalProgressForActivities(activities, multiGoals) {
-    const mg = multiGoals;
-    if (!mg) return null;
-
-    const currentDistance = (activities || []).reduce((sum, a) => sum + Number(a?.distance || 0), 0);
-    const currentDuration = (activities || []).reduce((sum, a) => sum + Number(a?.duration || 0), 0);
-    const currentCount = (activities || []).length;
-
-    const breakdown = {};
-    const ratios = [];
-
-    if (mg.distance) {
-      const r = mg.distance > 0 ? currentDistance / mg.distance : 0;
-      breakdown.distance = {
-        current: Math.round(currentDistance * 10) / 10,
-        target: mg.distance,
-        completed: Number.isFinite(r) ? r >= 1 : false,
-      };
-      ratios.push(Number.isFinite(r) ? r : 0);
-    }
-    if (mg.duration) {
-      const r = mg.duration > 0 ? currentDuration / mg.duration : 0;
-      breakdown.duration = {
-        current: Math.round(currentDuration * 10) / 10,
-        target: mg.duration,
-        completed: Number.isFinite(r) ? r >= 1 : false,
-      };
-      ratios.push(Number.isFinite(r) ? r : 0);
-    }
-    if (mg.count) {
-      const r = mg.count > 0 ? currentCount / mg.count : 0;
-      breakdown.count = {
-        current: currentCount,
-        target: mg.count,
-        completed: Number.isFinite(r) ? r >= 1 : false,
-      };
-      ratios.push(Number.isFinite(r) ? r : 0);
-    }
-
-    if (!ratios.length) return null;
-    const minRatio = Math.min(...ratios);
-    const clampedRatio = this._clamp(minRatio, 0, 1);
-    const percentage = Math.round(clampedRatio * 100);
-    const allCompleted = ratios.every((r) => r >= 1);
-
-    return { breakdown, minRatio, percentage, allCompleted };
+    return helpers.calcMultiGoalProgressForActivities(activities, multiGoals);
   }
 
   _isProgressionPact(challenge) {
-    const legacy = Boolean(challenge && challenge.mode === 'duo' && challenge.goal?.type === 'effort_points');
-    const v1 = Boolean(challenge && challenge.mode === 'duo' && challenge.pactRules === 'progression_7d_v1');
-    return legacy || v1;
+    return helpers.isProgressionPact(challenge);
   }
 
   _calcEffortPointsForActivities(activities) {
-    const byType = new Map();
-    for (const a of activities || []) {
-      if (!a) continue;
-      const t = a.type;
-      if (!t) continue;
-      const agg = byType.get(t) || { km: 0, min: 0, sessions: 0 };
-      agg.km += Number(a.distance || 0);
-      agg.min += Number(a.duration || 0);
-      agg.sessions += 1;
-      byType.set(t, agg);
-    }
-
-    const weights = {
-      walking: { km: 0.35, min: 0.06, sessions: 0.5 },
-      running: { km: 0.8, min: 0.1, sessions: 0.7 },
-      cycling: { km: 0.2, min: 0.05, sessions: 0.6 },
-      swimming: { km: 2.0, min: 0.08, sessions: 0.7 },
-      workout: { km: 0.0, min: 0.09, sessions: 0.9 },
-    };
-
-    let total = 0;
-    for (const [type, agg] of byType.entries()) {
-      const w = weights[type];
-      if (!w) continue;
-      total += (w.km * (agg.km || 0)) + (w.min * (agg.min || 0)) + (w.sessions * (agg.sessions || 0));
-    }
-
-    // Keep a stable, readable number for UI.
-    return Math.round(total * 10) / 10;
+    return helpers.calcEffortPointsForActivities(activities);
   }
 
   _isExpired(challenge) {
-    if (!challenge?.endDate) return false;
-    return new Date() > new Date(challenge.endDate);
+    return helpers.isExpired(challenge);
   }
+
+  _isSuccess(challenge) {
+    return helpers.isSuccess(challenge);
+  }
+
+  _getWeekBounds() {
+    return helpers.getWeekBounds();
+  }
+
+  _getPlayerId(player) {
+    return helpers.getPlayerId(player);
+  }
+
+  _findPlayer(challenge, userId) {
+    return helpers.findPlayer(challenge, userId);
+  }
+
+  _findOtherPlayer(challenge, userId) {
+    return helpers.findOtherPlayer(challenge, userId);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUSINESS LOGIC - Main challenge operations
+  // ═══════════════════════════════════════════════════════════════════════════
 
   _isSuccess(challenge) {
     if (!challenge || !challenge.endDate) return false;
