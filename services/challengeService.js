@@ -269,167 +269,174 @@ class ChallengeService {
     const isExpired = this._isExpired(challenge);
     const isSuccess = this._isSuccess(challenge);
 
-    // Special settlement: 7-day progression pact (DUO) with partial refund + limited advantage.
-    // Legacy: goal.type === 'effort_points'
-    // New: pactRules === 'progression_7d_v1' with user-visible multiGoals.
-    // IMPORTANT: settle only at expiry to allow progress > 100% (capped at 120% for payout).
-    if (this._isProgressionPact(challenge)) {
-      if (!isExpired) return challenge;
+    // ═══════════════════════════════════════════════════════════════════════
+    // NEW UNIFIED SETTLEMENT LOGIC
+    // Applies to all challenges (solo and duo) with the new reward system
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    // Only settle if either completed (success) or expired
+    if (!isSuccess && !isExpired) return challenge;
 
-      const isLegacyEffort = Boolean(challenge.goal?.type === 'effort_points');
+    const now = new Date();
+    const startDateNormalized = new Date(challenge.startDate);
+    startDateNormalized.setHours(0, 0, 0, 0);
+    const endDateNormalized = new Date(challenge.endDate);
+    endDateNormalized.setHours(23, 59, 59, 999);
 
-      // Internal PE goal stays stable.
-      // - Legacy effort_points uses its configured goal.value (default 35)
-      // - New progression_7d_v1 always uses 35 (UI goal is multiGoals)
-      const peGoal = isLegacyEffort ? Number(challenge.goal?.value || 35) : 35;
-      const multiGoals = this._getMultiGoals(challenge);
-      const stakePerPlayer = Number(challenge.stakePerPlayer ?? this.STAKE_PER_PLAYER);
-      const pot = stakePerPlayer * 2;
+    const stakePerPlayer = Number(challenge.stakePerPlayer ?? this.STAKE_PER_PLAYER);
+    const multiGoals = this._getMultiGoals(challenge);
+    const nGoals = helpers.countGoals(challenge);
+    const peRequired = helpers.estimateRequiredEffortPointsFromChallengeGoals(challenge);
+    const isSolo = challenge.mode === 'solo';
 
-      const now = new Date();
-      const startDateNormalized = new Date(challenge.startDate);
-      startDateNormalized.setHours(0, 0, 0, 0);
-      const endDateNormalized = new Date(challenge.endDate);
-      endDateNormalized.setHours(23, 59, 59, 999);
+    // Compute PE and progress for each player
+    const playerData = [];
+    for (let i = 0; i < (challenge.players || []).length; i++) {
+      const p = challenge.players[i];
+      const pid = typeof p.user === 'string' ? p.user : p.user._id;
 
-      // Recompute PE from activities at expiry for correctness.
-      const playerTotals = [];
-      for (let i = 0; i < (challenge.players || []).length; i++) {
-        const p = challenge.players[i];
-        const pid = typeof p.user === 'string' ? p.user : p.user._id;
+      const createdAtDate = challenge.createdAt ? new Date(challenge.createdAt) : startDateNormalized;
+      const lowerBound = startDateNormalized > createdAtDate ? startDateNormalized : createdAtDate;
 
-        const createdAtDate = challenge.createdAt ? new Date(challenge.createdAt) : startDateNormalized;
-        const lowerBound = startDateNormalized > createdAtDate ? startDateNormalized : createdAtDate;
+      const activityQuery = {
+        user: pid,
+        date: { $gte: startDateNormalized, $lte: endDateNormalized },
+        createdAt: { $gte: lowerBound },
+        type: { $in: challenge.activityTypes },
+      };
+      const activities = await Activity.find(activityQuery);
+      const peTotal = this._calcEffortPointsForActivities(activities);
 
-        const activityQuery = {
-          user: pid,
-          date: { $gte: startDateNormalized, $lte: endDateNormalized },
-          createdAt: { $gte: lowerBound },
-          type: { $in: challenge.activityTypes },
-        };
-        const activities = await Activity.find(activityQuery);
-        const peTotal = this._calcEffortPointsForActivities(activities);
+      // Calculate progress based on multiGoals or legacy goal
+      const wasCompleted = Boolean(challenge.players[i].completed);
+      let completed = false;
+      let progressRatio = 0;
 
-        const wasCompleted = Boolean(challenge.players[i].completed);
-        let completed = false;
+      if (multiGoals) {
+        const mg = this._calcMultiGoalProgressForActivities(activities, multiGoals);
+        progressRatio = mg ? (mg.minRatio ?? 0) : 0;
+        challenge.players[i].progress = mg ? mg.percentage : 0;
+        challenge.players[i].multiGoalProgress = mg ? mg.breakdown : null;
+        completed = Boolean(mg && mg.allCompleted);
+      } else {
+        // Legacy single goal progress
+        const goalValue = Number(challenge.goal?.value || 0);
+        const goalType = challenge.goal?.type;
 
-        if (isLegacyEffort) {
-          challenge.players[i].progress = peTotal;
-          completed = peGoal > 0 ? peTotal >= peGoal : false;
-          challenge.players[i].multiGoalProgress = null;
-        } else {
-          const mg = this._calcMultiGoalProgressForActivities(activities, multiGoals);
-          challenge.players[i].progress = mg ? mg.percentage : 0;
-          challenge.players[i].multiGoalProgress = mg ? mg.breakdown : null;
-          completed = Boolean(mg && mg.allCompleted);
+        let current = 0;
+        if (goalType === 'distance') {
+          current = activities.reduce((sum, a) => sum + Number(a?.distance || 0), 0);
+        } else if (goalType === 'duration') {
+          current = activities.reduce((sum, a) => sum + Number(a?.duration || 0), 0);
+        } else if (goalType === 'count') {
+          current = activities.length;
+        } else if (goalType === 'effort_points') {
+          current = peTotal;
         }
 
-        challenge.players[i].completed = completed;
-        if (!wasCompleted && completed) {
-          challenge.players[i].completedAt = now;
-        }
-        playerTotals.push({ userId: pid, peTotal });
+        progressRatio = goalValue > 0 ? current / goalValue : 0;
+        challenge.players[i].progress = Math.round(progressRatio * 100);
+        completed = progressRatio >= 1;
       }
 
-      const r = playerTotals.map((p) => {
-        const ri = peGoal > 0 ? Number(p.peTotal) / peGoal : 0;
-        return Number.isFinite(ri) ? ri : 0;
+      challenge.players[i].completed = completed;
+      if (!wasCompleted && completed) {
+        challenge.players[i].completedAt = now;
+      }
+
+      playerData.push({ 
+        userId: pid, 
+        peTotal, 
+        progressRatio: this._clamp(progressRatio, 0, 1),
+        completed,
       });
-
-      const rCap = r.map((x) => Math.min(x, 1.2));
-      const bothHitGoal = isLegacyEffort
-        ? r.every((x) => x >= 1.0)
-        : (challenge.players || []).every((pl) => Boolean(pl?.completed));
-
-      if (bothHitGoal) {
-        const minCap = Math.min(rCap[0] ?? 0, rCap[1] ?? 0);
-        const avgCap = ((rCap[0] ?? 0) + (rCap[1] ?? 0)) / 2;
-        const rPair = (minCap + avgCap) / 2;
-
-        const M = this._clamp(1.2 + 1.5 * (rPair - 1.0), 1.2, 2.0);
-        const gTotal = Math.round(pot * M);
-
-        const denom = (rCap[0] ?? 0) + (rCap[1] ?? 0);
-        const pRaw = denom > 0 ? (rCap[0] ?? 0) / denom : 0.5;
-        const p1 = this._clamp(pRaw, 0.45, 0.55);
-        const gain1 = Math.round(gTotal * p1);
-        const gain2 = gTotal - gain1;
-
-        await this._payoutStakeAmountIfHeld(challenge, playerTotals[0].userId, gain1, {
-          kind: 'stake_payout',
-          note: 'Gain pacte PE (7 jours)',
-        });
-        await this._payoutStakeAmountIfHeld(challenge, playerTotals[1].userId, gain2, {
-          kind: 'stake_payout',
-          note: 'Gain pacte PE (7 jours)',
-        });
-
-        challenge.settlement = { status: 'success', reason: 'completed', settledAt: now };
-        challenge.status = 'completed';
-        await challenge.save();
-
-        await this._handleRecurrenceIfNeeded(challenge);
-        return challenge;
-      }
-
-      // Not successful: partial refund per player based on their own r (uncapped), remainder burned.
-      for (let i = 0; i < playerTotals.length; i++) {
-        const pid = playerTotals[i].userId;
-        const refundRatio = this._clamp(r[i] ?? 0, 0, 1);
-        const refund = Math.round(stakePerPlayer * refundRatio);
-        await this._refundStakeAmountIfHeld(challenge, pid, refund, {
-          kind: 'stake_refund',
-          note: 'Remboursement partiel pacte (7 jours)',
-          burnKind: 'stake_burn',
-          burnNote: 'Mise restante brûlée (pacte non réussi)',
-        });
-      }
-
-      challenge.settlement = { status: 'loss', reason: 'expired', settledAt: now };
-      challenge.status = 'failed';
-      await challenge.save();
-      return challenge;
     }
 
-    if (isSuccess) {
-      const multiplier = this.STAKE_PAYOUT_MULTIPLIER;
-      for (const player of challenge.players || []) {
-        const playerId = typeof player.user === 'string' ? player.user : player.user._id;
-        await this._payoutStakeIfHeld(challenge, playerId, multiplier);
+    // For duo, check if BOTH players completed
+    const allCompleted = isSolo 
+      ? playerData[0]?.completed 
+      : playerData.every((p) => p.completed);
+
+    // Calculate overall progress (min for duo, direct for solo)
+    const overallProgress = isSolo
+      ? playerData[0]?.progressRatio ?? 0
+      : Math.min(...playerData.map((p) => p.progressRatio));
+
+    // Compute settlement amounts using the unified function
+    const settlement = helpers.computeSettlementAmounts({
+      stake: stakePerPlayer,
+      nGoals,
+      peRequired,
+      peA: playerData[0]?.peTotal ?? 0,
+      peB: isSolo ? 0 : (playerData[1]?.peTotal ?? 0),
+      progressRatio: overallProgress,
+      completed: allCompleted,
+      isSolo,
+    });
+
+    // Dev logging
+    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+      this._log('🎯 Settlement computed:', {
+        challengeId: challenge._id,
+        nGoals,
+        peRequired,
+        players: playerData.map((p) => ({ pe: p.peTotal, progress: p.progressRatio })),
+        settlement,
+      });
+    }
+
+    if (settlement.success) {
+      // Success: payout gains
+      if (isSolo) {
+        await this._payoutStakeAmountIfHeld(challenge, playerData[0].userId, settlement.gainA, {
+          kind: 'stake_payout',
+          note: `Gain challenge (${nGoals} objectif${nGoals > 1 ? 's' : ''})`,
+        });
+      } else {
+        await this._payoutStakeAmountIfHeld(challenge, playerData[0].userId, settlement.gainA, {
+          kind: 'stake_payout',
+          note: `Gain pacte (${Math.round(settlement.shareA * 100)}%)`,
+        });
+        await this._payoutStakeAmountIfHeld(challenge, playerData[1].userId, settlement.gainB, {
+          kind: 'stake_payout',
+          note: `Gain pacte (${Math.round(settlement.shareB * 100)}%)`,
+        });
       }
-      challenge.settlement = { status: 'success', reason: 'completed', settledAt: new Date() };
+
+      challenge.settlement = { status: 'success', reason: 'completed', settledAt: now };
       challenge.status = 'completed';
       await challenge.save();
 
-      // ✅ Handle recurrence after successful completion
       await this._handleRecurrenceIfNeeded(challenge);
-
       return challenge;
     }
 
-    if (isExpired) {
-      for (const player of challenge.players || []) {
-        const playerId = typeof player.user === 'string' ? player.user : player.user._id;
-        this._burnStakeIfHeld(challenge, playerId);
-        await this._recordDiamondTx({
-          userId: playerId,
-          amount: 0,
-          kind: 'stake_burn',
-          refId: challenge?._id,
-          note: 'Mise perdue (pacte expiré)',
-        });
-      }
-      challenge.settlement = { status: 'loss', reason: 'expired', settledAt: new Date() };
-      challenge.status = 'failed';
-      await challenge.save();
-      return challenge;
+    // Failure: partial refund and burn
+    if (isSolo) {
+      await this._refundStakeAmountIfHeld(challenge, playerData[0].userId, settlement.refundTotal, {
+        kind: 'stake_refund',
+        note: 'Remboursement partiel (challenge non réussi)',
+        burnKind: 'stake_burn',
+        burnNote: 'Mise restante brûlée',
+      });
+    } else {
+      await this._refundStakeAmountIfHeld(challenge, playerData[0].userId, settlement.refundA, {
+        kind: 'stake_refund',
+        note: 'Remboursement partiel (pacte non réussi)',
+        burnKind: 'stake_burn',
+        burnNote: 'Mise restante brûlée',
+      });
+      await this._refundStakeAmountIfHeld(challenge, playerData[1].userId, settlement.refundB, {
+        kind: 'stake_refund',
+        note: 'Remboursement partiel (pacte non réussi)',
+        burnKind: 'stake_burn',
+        burnNote: 'Mise restante brûlée',
+      });
     }
 
-    if (reasonHint === 'cancelled') {
-      // handled elsewhere
-      return challenge;
-    }
-
+    challenge.settlement = { status: 'loss', reason: 'expired', settledAt: now };
+    challenge.status = 'failed';
+    await challenge.save();
     return challenge;
   }
 
