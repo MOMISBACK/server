@@ -104,13 +104,31 @@ const commonValidation = [
 
 /**
  * Règles pour les activités avec distance
+ * Note: La distance n'est PAS obligatoire pour les activités importées (Health Connect peut ne pas fournir cette donnée)
  */
 const distanceValidation = [
   body('distance')
-    .if(body('type').isIn(['running', 'cycling', 'walking', 'swimming']))
-    .notEmpty().withMessage('La distance est obligatoire pour ce type d\'activité')
-    .isFloat({ min: 0.01, max: 1000 })
-    .withMessage('La distance doit être entre 0.01 et 1000 km'),
+    .custom((value, { req }) => {
+      const type = req.body.type;
+      const externalSource = req.body.externalSource;
+      const needsDistance = ['running', 'cycling', 'walking', 'swimming'].includes(type);
+      const isImported = !!externalSource; // If externalSource is present, it's an imported activity
+      
+      // Distance is required only for manual activities (no externalSource) of distance-based types
+      if (needsDistance && !isImported && (value === undefined || value === null || value === '')) {
+        throw new Error('La distance est obligatoire pour ce type d\'activité');
+      }
+      
+      // If distance is provided, validate it
+      if (value !== undefined && value !== null && value !== '') {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue) || numValue < 0 || numValue > 1000) {
+          throw new Error('La distance doit être entre 0 et 1000 km');
+        }
+      }
+      
+      return true;
+    }),
   
   body('elevationGain')
     .optional()
