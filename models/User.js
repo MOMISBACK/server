@@ -65,8 +65,14 @@ const userSchema = new mongoose.Schema({
     default: false,
   },
 
-  // ✅ Health integrations (Apple Health / Health Connect)
+  // ✅ Health integrations (Apple Health / Health Connect / Strava)
   health: {
+    // Currently active provider (only one at a time)
+    activeProvider: {
+      type: String,
+      enum: ['appleHealth', 'healthConnect', 'strava', null],
+      default: null,
+    },
     appleHealth: {
       linked: { type: Boolean, default: false },
       autoImport: { type: Boolean, default: false },
@@ -78,6 +84,16 @@ const userSchema = new mongoose.Schema({
       autoImport: { type: Boolean, default: false },
       lastSyncAt: { type: Date },
       permissions: [{ type: String }],
+    },
+    strava: {
+      linked: { type: Boolean, default: false },
+      autoImport: { type: Boolean, default: false },
+      lastSyncAt: { type: Date },
+      athleteId: { type: String },        // Strava athlete ID
+      accessToken: { type: String },       // OAuth access token (encrypted in prod)
+      refreshToken: { type: String },      // OAuth refresh token
+      tokenExpiresAt: { type: Date },      // Token expiration time
+      scope: { type: String },             // Granted scopes
     },
   },
 

@@ -14,6 +14,7 @@ const activityRoutes = require('./routes/activityRoutes');
 const challengeRoutes = require('./routes/challengeRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const stravaRoutes = require('./routes/stravaRoutes');
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use('/api/activities', activityRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/strava', stravaRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

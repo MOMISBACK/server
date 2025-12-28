@@ -192,8 +192,18 @@ const getHealthStatus = async (req, res) => {
 const updateHealthStatus = async (req, res) => {
   try {
     const provider = req.body?.provider;
-    if (!['appleHealth', 'healthConnect'].includes(provider)) {
+    const validProviders = ['appleHealth', 'healthConnect', 'strava'];
+    
+    if (!validProviders.includes(provider)) {
       return res.status(400).json({ success: false, message: 'Provider invalide' });
+    }
+
+    // Strava is handled separately via /api/strava routes (OAuth flow)
+    if (provider === 'strava') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Strava doit être connecté via /api/strava/auth' 
+      });
     }
 
     const linked = req.body?.linked;
@@ -202,6 +212,31 @@ const updateHealthStatus = async (req, res) => {
     const lastSyncAt = req.body?.lastSyncAt;
 
     const update = {};
+    
+    // If linking a new provider, set it as active and unlink others
+    if (linked === true) {
+      update['health.activeProvider'] = provider;
+      
+      // Unlink other providers
+      for (const p of validProviders) {
+        if (p !== provider && p !== 'strava') {
+          update[`health.${p}.linked`] = false;
+          update[`health.${p}.autoImport`] = false;
+        }
+      }
+      // Also unlink Strava if it was active
+      update['health.strava.linked'] = false;
+      update['health.strava.autoImport'] = false;
+    }
+    
+    // If unlinking the active provider, clear activeProvider
+    if (linked === false) {
+      const user = await User.findById(req.user.id).select('health.activeProvider');
+      if (user?.health?.activeProvider === provider) {
+        update['health.activeProvider'] = null;
+      }
+    }
+    
     if (typeof linked === 'boolean') update[`health.${provider}.linked`] = linked;
     if (typeof autoImport === 'boolean') update[`health.${provider}.autoImport`] = autoImport;
     if (Array.isArray(permissions)) update[`health.${provider}.permissions`] = permissions.map(String);
