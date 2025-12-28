@@ -133,31 +133,121 @@ const handleCallback = async (req, res) => {
 
     console.log(`✅ [Strava] User ${user._id} connected (athlete: ${tokens.athlete.id})`);
 
-    // Redirect to app (for mobile deep link) or return JSON
-    const isMobileCallback = req.headers['user-agent']?.includes('Mobile') || 
-                             req.query.mobile === 'true';
-    
-    if (isMobileCallback) {
-      return res.redirect(`mmp3://strava-callback?success=true&athleteId=${tokens.athlete.id}`);
+    // Return HTML page that redirects to the app
+    // This works better than a direct redirect on Android Chrome
+    const deepLink = `mmp3://strava-callback?success=true&athleteId=${tokens.athlete.id}`;
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion Strava réussie</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+      color: white;
+      text-align: center;
+      padding: 20px;
     }
+    .success-icon { font-size: 64px; margin-bottom: 20px; }
+    h1 { margin: 0 0 10px 0; font-size: 24px; }
+    p { margin: 0 0 30px 0; opacity: 0.8; }
+    .btn {
+      background: #FC4C02;
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .hint { margin-top: 20px; font-size: 12px; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="success-icon">✅</div>
+  <h1>Strava connecté !</h1>
+  <p>Tu peux retourner à l'application.</p>
+  <a href="${deepLink}" class="btn">Ouvrir Match My Pace</a>
+  <p class="hint">Si le bouton ne fonctionne pas, ferme cette page manuellement.</p>
+  <script>
+    // Try to redirect automatically
+    setTimeout(function() {
+      window.location.href = "${deepLink}";
+    }, 500);
+  </script>
+</body>
+</html>`;
 
-    res.json({
-      success: true,
-      data: {
-        linked: true,
-        athleteId: tokens.athlete.id,
-        athleteName: `${tokens.athlete.firstname} ${tokens.athlete.lastname}`,
-      },
-    });
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
   } catch (error) {
     console.error('❌ [Strava] callback error:', error);
     
-    // Try to redirect with error for mobile
-    if (req.query.mobile === 'true') {
-      return res.redirect(`mmp3://strava-callback?error=${encodeURIComponent(error.message)}`);
+    // Return error HTML page
+    const deepLink = `mmp3://strava-callback?error=${encodeURIComponent(error.message)}`;
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Erreur Strava</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #1a1a2e;
+      color: white;
+      text-align: center;
+      padding: 20px;
     }
-    
-    res.status(500).json({ success: false, message: error.message });
+    .error-icon { font-size: 64px; margin-bottom: 20px; }
+    h1 { margin: 0 0 10px 0; font-size: 24px; color: #ff6b6b; }
+    p { margin: 0 0 30px 0; opacity: 0.8; }
+    .btn {
+      background: #333;
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      font-size: 18px;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="error-icon">❌</div>
+  <h1>Erreur de connexion</h1>
+  <p>${error.message}</p>
+  <a href="${deepLink}" class="btn">Retour à l'app</a>
+  <script>
+    setTimeout(function() {
+      window.location.href = "${deepLink}";
+    }, 1000);
+  </script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
   }
 };
 
