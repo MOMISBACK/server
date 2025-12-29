@@ -58,10 +58,10 @@ const activitySchema = new mongoose.Schema({
     enum: ['manual', 'tracked'],
   },
 
-  // Métadonnées import (Apple Health / Health Connect)
+  // Métadonnées import (Apple Health / Health Connect / Strava)
   externalSource: {
     type: String,
-    enum: ['appleHealth', 'healthConnect'],
+    enum: ['appleHealth', 'healthConnect', 'strava'],
   },
   externalId: {
     type: String,
