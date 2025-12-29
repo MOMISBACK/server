@@ -3,6 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
+const stravaSyncCron = require('../jobs/stravaSyncCron');
 
 // Route pour nettoyer les indexes problématiques
 router.get('/fix-indexes', async (req, res) => {
@@ -69,6 +70,39 @@ router.get('/fix-indexes', async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STRAVA SYNC CRON MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/strava-sync/stats - Get sync stats
+router.get('/strava-sync/stats', (req, res) => {
+  const stats = stravaSyncCron.getStats();
+  res.json({
+    success: true,
+    data: stats,
+  });
+});
+
+// POST /api/admin/strava-sync/trigger - Manually trigger sync
+router.post('/strava-sync/trigger', async (req, res) => {
+  try {
+    // Run async, don't wait
+    stravaSyncCron.triggerManualSync().catch(err => {
+      console.error('[Admin] Manual Strava sync error:', err);
+    });
+    
+    res.json({
+      success: true,
+      message: 'Strava sync started in background',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 });
