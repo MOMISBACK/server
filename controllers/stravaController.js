@@ -354,14 +354,15 @@ const syncActivities = async (req, res) => {
     const accessToken = await stravaService.getValidAccessToken(user);
 
     // Determine time range
+    const body = req.body || {};
     const lastSync = user.health.strava.lastSyncAt;
-    const after = req.body.after 
-      ? new Date(req.body.after) 
+    const after = body.after 
+      ? new Date(body.after) 
       : lastSync 
         ? new Date(lastSync) 
         : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // Default: last 7 days
     
-    const before = req.body.before ? new Date(req.body.before) : new Date();
+    const before = body.before ? new Date(body.before) : new Date();
 
     console.log(`[Strava] Syncing activities for user ${user._id} from ${after.toISOString()} to ${before.toISOString()}`);
 
