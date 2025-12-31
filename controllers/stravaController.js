@@ -8,6 +8,7 @@ const User = require('../models/User');
 const Activity = require('../models/Activity');
 const stravaConfig = require('../config/strava');
 const stravaService = require('../services/stravaService');
+const { linkStravaProvider, disconnectProvider } = require('../services/healthProviderService');
 
 // Temporary state storage (in production, use Redis or similar)
 // Format: { state: { userId, createdAt } }
@@ -107,32 +108,8 @@ const handleCallback = async (req, res) => {
       });
     }
 
-    // Unlink previous provider if different
-    if (user.health?.activeProvider && user.health.activeProvider !== 'strava') {
-      const prevProvider = user.health.activeProvider;
-      if (user.health[prevProvider]) {
-        user.health[prevProvider].linked = false;
-        user.health[prevProvider].autoImport = false;
-      }
-    }
-
-    // Update Strava link
-    user.health = user.health || {};
-    user.health.strava = {
-      linked: true,
-      autoImport: true,
-      athleteId: String(tokens.athlete.id),
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      tokenExpiresAt: tokens.expiresAt,
-      scope: tokens.scope,
-    };
-    user.health.activeProvider = 'strava';
-
-    // Import profile picture from Strava if available
-    if (tokens.athlete?.profile) {
-      user.profilePicture = tokens.athlete.profile;
-    }
+    // Link Strava provider (automatically unlinks others)
+    linkStravaProvider(user, tokens);
 
     await user.save();
 
@@ -299,32 +276,8 @@ const handleCallbackCode = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Unlink previous provider
-    if (user.health?.activeProvider && user.health.activeProvider !== 'strava') {
-      const prevProvider = user.health.activeProvider;
-      if (user.health[prevProvider]) {
-        user.health[prevProvider].linked = false;
-        user.health[prevProvider].autoImport = false;
-      }
-    }
-
-    // Update Strava link
-    user.health = user.health || {};
-    user.health.strava = {
-      linked: true,
-      autoImport: true,
-      athleteId: String(tokens.athlete.id),
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      tokenExpiresAt: tokens.expiresAt,
-      scope: tokens.scope,
-    };
-    user.health.activeProvider = 'strava';
-
-    // Import profile picture from Strava if available
-    if (tokens.athlete?.profile) {
-      user.profilePicture = tokens.athlete.profile;
-    }
+    // Link Strava provider (automatically unlinks others)
+    linkStravaProvider(user, tokens);
 
     await user.save();
 
