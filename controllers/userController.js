@@ -20,6 +20,7 @@ const normalizePartnerLinks = (partnerLinks) => {
               username: partnerDoc.username,
               email: partnerDoc.email,
               totalDiamonds: partnerDoc.totalDiamonds ?? 200,
+              profilePicture: partnerDoc.profilePicture || null,
             },
           }
         : {}),

@@ -14,6 +14,11 @@ const userSchema = new mongoose.Schema({
     maxlength: [20, 'Pseudo trop long (max 20)'],
     match: [/^[a-z0-9_]+$/i, 'Pseudo invalide (a-z, 0-9, _)'],
   },
+  // Photo de profil (URL, typiquement importée depuis Strava)
+  profilePicture: {
+    type: String,
+    default: null,
+  },
   email: {
     type: String,
     required: [true, 'Email requis'],

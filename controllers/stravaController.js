@@ -129,6 +129,11 @@ const handleCallback = async (req, res) => {
     };
     user.health.activeProvider = 'strava';
 
+    // Import profile picture from Strava if available
+    if (tokens.athlete?.profile) {
+      user.profilePicture = tokens.athlete.profile;
+    }
+
     await user.save();
 
     console.log(`✅ [Strava] User ${user._id} connected (athlete: ${tokens.athlete.id})`);
@@ -315,6 +320,11 @@ const handleCallbackCode = async (req, res) => {
       scope: tokens.scope,
     };
     user.health.activeProvider = 'strava';
+
+    // Import profile picture from Strava if available
+    if (tokens.athlete?.profile) {
+      user.profilePicture = tokens.athlete.profile;
+    }
 
     await user.save();
 
