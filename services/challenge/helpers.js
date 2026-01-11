@@ -167,21 +167,93 @@ const isSuccess = (challenge) => {
 
 /**
  * Normalize week dates to Monday 00:00:00 - Sunday 23:59:59
+ * Always returns the current calendar week (Monday to Sunday)
  */
 const getWeekBounds = () => {
   const now = new Date();
-  const day = now.getDay();
-  const daysToMonday = (day + 6) % 7;
+  const day = now.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
   
+  // Calculate days since Monday (Monday = 0)
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  
+  // Start = Monday 00:00:00
   const startDate = new Date(now);
-  startDate.setDate(now.getDate() - daysToMonday);
+  startDate.setDate(now.getDate() - daysSinceMonday);
   startDate.setHours(0, 0, 0, 0);
   
+  // End = Sunday 23:59:59
   const endDate = new Date(startDate);
   endDate.setDate(startDate.getDate() + 6);
   endDate.setHours(23, 59, 59, 999);
   
   return { startDate, endDate };
+};
+
+/**
+ * Get ISO week number (1-53) for a date
+ * ISO weeks start on Monday, week 1 contains Jan 4
+ */
+const getISOWeekNumber = (date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  // Set to nearest Thursday: current date + 4 - current day number
+  // Make Sunday's day number 7
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  // Get first day of year
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  // Calculate full weeks to nearest Thursday
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return weekNo;
+};
+
+/**
+ * Get ISO week year (can differ from calendar year at year boundaries)
+ */
+const getISOWeekYear = (date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  return d.getFullYear();
+};
+
+/**
+ * Get the Monday-Sunday bounds for a specific ISO week
+ */
+const getWeekBoundsForISOWeek = (year, weekNumber) => {
+  // Find January 4th of the year (always in week 1)
+  const jan4 = new Date(year, 0, 4);
+  // Find the Monday of week 1
+  const dayOfWeek = jan4.getDay() || 7; // Convert Sunday from 0 to 7
+  const week1Monday = new Date(jan4);
+  week1Monday.setDate(jan4.getDate() - (dayOfWeek - 1));
+  
+  // Calculate the Monday of the target week
+  const startDate = new Date(week1Monday);
+  startDate.setDate(week1Monday.getDate() + (weekNumber - 1) * 7);
+  startDate.setHours(0, 0, 0, 0);
+  
+  // Sunday of the target week
+  const endDate = new Date(startDate);
+  endDate.setDate(startDate.getDate() + 6);
+  endDate.setHours(23, 59, 59, 999);
+  
+  return { startDate, endDate };
+};
+
+/**
+ * Get the next week bounds (next Monday to Sunday)
+ */
+const getNextWeekBounds = () => {
+  const { endDate: currentSunday } = getWeekBounds();
+  const nextMonday = new Date(currentSunday);
+  nextMonday.setDate(currentSunday.getDate() + 1);
+  nextMonday.setHours(0, 0, 0, 0);
+  
+  const nextSunday = new Date(nextMonday);
+  nextSunday.setDate(nextMonday.getDate() + 6);
+  nextSunday.setHours(23, 59, 59, 999);
+  
+  return { startDate: nextMonday, endDate: nextSunday };
 };
 
 /**
@@ -487,6 +559,11 @@ module.exports = {
   getPlayerId,
   findPlayer,
   findOtherPlayer,
+  // ISO week helpers
+  getISOWeekNumber,
+  getISOWeekYear,
+  getWeekBoundsForISOWeek,
+  getNextWeekBounds,
   // New unified reward system
   REWARD_CONSTANTS,
   countGoals,

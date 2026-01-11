@@ -4,6 +4,7 @@ const app = require('./app');
 const connectDB = require('./config/db');
 const challengeCron = require('./jobs/challengeCron');
 const stravaSyncCron = require('./jobs/stravaSyncCron');
+const notificationCron = require('./jobs/notificationCron');
 
 const port = process.env.PORT || 5000;
 
@@ -16,6 +17,7 @@ const startServer = async () => {
     // ✅ DÉMARRER LES CRON JOBS
     challengeCron.startAll();
     stravaSyncCron.start();
+    notificationCron.startDailyReminderCron();
     
     // Démarrer le serveur
     const server = app.listen(port, () => {
@@ -28,6 +30,7 @@ const startServer = async () => {
     process.on('SIGTERM', () => {
       console.log('SIGTERM reçu, arrêt du serveur...');
       stravaSyncCron.stop();
+      notificationCron.stopAll();
       server.close(() => {
         console.log('Serveur arrêté');
         process.exit(0);

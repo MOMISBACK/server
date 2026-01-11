@@ -428,4 +428,85 @@ module.exports = {
       res.status(400).json({ success: false, message: error.message });
     }
   },
+
+  // ✅ Push notification token management
+  updatePushToken: async (req, res) => {
+    try {
+      const { pushToken } = req.body;
+      
+      if (!pushToken || typeof pushToken !== 'string') {
+        return res.status(400).json({ success: false, message: 'Push token requis' });
+      }
+
+      await User.findByIdAndUpdate(req.user.id, { pushToken });
+      
+      res.json({ success: true, message: 'Token enregistré' });
+    } catch (error) {
+      console.error('❌ [updatePushToken]:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+
+  deletePushToken: async (req, res) => {
+    try {
+      await User.findByIdAndUpdate(req.user.id, { pushToken: null });
+      res.json({ success: true, message: 'Token supprimé' });
+    } catch (error) {
+      console.error('❌ [deletePushToken]:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+
+  // ✅ Notification preferences management
+  getNotificationPreferences: async (req, res) => {
+    try {
+      const user = await User.findById(req.user.id).select('notificationPreferences pushToken');
+      res.json({ 
+        success: true, 
+        data: {
+          preferences: user.notificationPreferences || {
+            dailyReminder: true,
+            challengeUpdates: true,
+            partnerActivity: true,
+            dailyReminderHour: 9,
+          },
+          hasPushToken: Boolean(user.pushToken),
+        }
+      });
+    } catch (error) {
+      console.error('❌ [getNotificationPreferences]:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+
+  updateNotificationPreferences: async (req, res) => {
+    try {
+      const { dailyReminder, challengeUpdates, partnerActivity, dailyReminderHour } = req.body;
+      
+      const updates = {};
+      if (typeof dailyReminder === 'boolean') {
+        updates['notificationPreferences.dailyReminder'] = dailyReminder;
+      }
+      if (typeof challengeUpdates === 'boolean') {
+        updates['notificationPreferences.challengeUpdates'] = challengeUpdates;
+      }
+      if (typeof partnerActivity === 'boolean') {
+        updates['notificationPreferences.partnerActivity'] = partnerActivity;
+      }
+      if (typeof dailyReminderHour === 'number' && dailyReminderHour >= 0 && dailyReminderHour <= 23) {
+        updates['notificationPreferences.dailyReminderHour'] = dailyReminderHour;
+      }
+
+      const user = await User.findByIdAndUpdate(
+        req.user.id, 
+        { $set: updates },
+        { new: true }
+      ).select('notificationPreferences');
+
+      res.json({ success: true, data: { preferences: user.notificationPreferences } });
+    } catch (error) {
+      console.error('❌ [updateNotificationPreferences]:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
 };

@@ -188,12 +188,29 @@ const weeklyChallengeSchema = new mongoose.Schema({
     default: null,
   },
   
+  // Week tracking for yearly progress (ISO week number)
+  weekNumber: {
+    type: Number,
+    min: 1,
+    max: 53,
+    default: null,
+    index: true
+  },
+  
+  // Year of the challenge (for yearly progress tracking)
+  year: {
+    type: Number,
+    default: null,
+    index: true
+  },
+
   // Auto-renewal configuration
   recurrence: {
     enabled: {
       type: Boolean,
       default: false
     },
+    // null = infinite (until abandoned)
     weeksCount: {
       type: Number,
       min: 1,
@@ -336,6 +353,14 @@ weeklyChallengeSchema.index({
   status: 1, 
   endDate: 1, 
   updatedAt: 1 
+});
+
+// Index for yearly progress queries
+weeklyChallengeSchema.index({ 
+  'players.user': 1, 
+  year: 1, 
+  weekNumber: 1,
+  status: 1 
 });
 
 // ✅ Virtuals

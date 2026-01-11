@@ -3,6 +3,7 @@
 const cron = require('node-cron');
 const WeeklyChallenge = require('../models/WeeklyChallenge');
 const User = require('../models/User');
+const challengeService = require('../services/challengeService');
 
 class ChallengeCron {
   
@@ -15,7 +16,8 @@ class ChallengeCron {
       finalize: null,
       bonus: null,
       cleanupInvitations: null,
-      cleanupOldChallenges: null
+      cleanupOldChallenges: null,
+      weeklyRenewal: null // ✅ NEW: Cron pour renouvellement hebdomadaire
     };
   }
 
@@ -219,6 +221,7 @@ class ChallengeCron {
     this.startBonusCheckCron();
     this.startCleanupInvitationsCron();
     this.startCleanupOldChallengesCron();
+    this.startWeeklyRenewalCron(); // ✅ NEW: Renouvellement hebdomadaire
     
     console.log('✅ Tous les CRON jobs démarrés avec succès');
   }
@@ -231,11 +234,65 @@ class ChallengeCron {
     if (this.jobs.bonus) this.jobs.bonus.stop();
     if (this.jobs.cleanupInvitations) this.jobs.cleanupInvitations.stop();
     if (this.jobs.cleanupOldChallenges) this.jobs.cleanupOldChallenges.stop();
+    if (this.jobs.weeklyRenewal) this.jobs.weeklyRenewal.stop();
     
     // Libérer tous les locks
     this.locks.clear();
     
     console.log('✅ Tous les CRON jobs arrêtés');
+  }
+
+  // ✅ NEW: Cron pour le renouvellement hebdomadaire (Dimanche minuit → Lundi 00:01)
+  startWeeklyRenewalCron() {
+    // Run at 00:01 on Monday (just after Sunday midnight)
+    // This gives a 1-minute buffer after end of week
+    this.jobs.weeklyRenewal = cron.schedule('1 0 * * 1', async () => {
+      await this._runWithLock('WEEKLY_RENEWAL', async () => {
+        console.log('🔄 [CRON WEEKLY_RENEWAL] Renouvellement hebdomadaire des pactes...');
+        
+        // Find all challenges that just expired (previous week's Sunday)
+        // and have recurrence.enabled = true
+        const now = new Date();
+        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        
+        const expiredChallenges = await WeeklyChallenge.find({
+          status: { $in: ['active', 'completed'] },
+          endDate: { $gte: oneDayAgo, $lt: now },
+          'recurrence.enabled': true
+        }).populate('players.user', 'username email totalDiamonds');
+
+        console.log(`📋 ${expiredChallenges.length} challenge(s) à renouveler`);
+
+        let renewedCount = 0;
+        let errorCount = 0;
+
+        for (const challenge of expiredChallenges) {
+          try {
+            // First, finalize the current challenge (settlement)
+            if (challenge.status === 'active') {
+              await challengeService.finalizeChallenge(challenge._id);
+              // Reload to get updated state
+              const updated = await WeeklyChallenge.findById(challenge._id);
+              if (updated) {
+                // Handle recurrence
+                const newChallenge = await challengeService._handleRecurrenceIfNeeded(updated);
+                if (newChallenge) {
+                  console.log(`  ✅ Challenge ${challenge._id} renouvelé → ${newChallenge._id}`);
+                  renewedCount++;
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`  ❌ Erreur renouvellement ${challenge._id}:`, error.message);
+            errorCount++;
+          }
+        }
+
+        console.log(`📊 Résultats renouvellement: ${renewedCount} renouvelé(s), ${errorCount} erreur(s)`);
+      });
+    });
+
+    console.log('✅ CRON job activé: Renouvellement hebdomadaire (Lundi 00:01)');
   }
 
   // ✅ NEW: Méthode pour forcer l'exécution manuelle (pour tests)

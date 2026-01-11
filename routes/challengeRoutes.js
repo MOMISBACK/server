@@ -12,6 +12,8 @@ router.get('/invitations', protect, challengeController.getInvitations);
 router.get('/pending-sent', protect, challengeController.getPendingSent);
 router.get('/duo/history', protect, challengeController.getDuoHistory);
 router.get('/solo/history', protect, challengeController.getSoloHistory);
+router.get('/year-progress', protect, challengeController.getYearProgress);
+router.get('/year-progress/:year', protect, challengeController.getYearProgress);
 
 // POST endpoints
 router.post('/', protect, challengeController.createChallenge);

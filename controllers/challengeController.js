@@ -274,6 +274,28 @@ async function refreshProgress(req, res) {
   }
 }
 
+/**
+ * GET /api/challenges/year-progress
+ * GET /api/challenges/year-progress/:year
+ * Get yearly progress (52 weeks) with status for each week
+ */
+async function getYearProgress(req, res) {
+  try {
+    const year = req.params.year ? parseInt(req.params.year, 10) : new Date().getFullYear();
+    const slot = typeof req.query?.slot === 'string' ? req.query.slot : undefined;
+    
+    if (isNaN(year) || year < 2020 || year > 2100) {
+      return sendError(res, 'Année invalide');
+    }
+
+    const progress = await challengeService.getYearProgress(req.user.id, year, slot ? { slot } : undefined);
+    return sendSuccess(res, progress);
+  } catch (error) {
+    console.error('Erreur GET /year-progress:', error);
+    return sendServerError(res, error);
+  }
+}
+
 module.exports = {
   getCurrentChallenge,
   getInvitations,
@@ -289,4 +311,5 @@ module.exports = {
   updateCurrentChallenge,
   deleteCurrentChallenge,
   refreshProgress,
+  getYearProgress,
 };

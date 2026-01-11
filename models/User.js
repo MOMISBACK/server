@@ -117,6 +117,25 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+
+  // ✅ Push notification token (Expo Push Token)
+  pushToken: {
+    type: String,
+    default: null,
+  },
+  // Track when notifications were last sent
+  lastNotificationSentAt: {
+    type: Date,
+    default: null,
+  },
+  // User preferences for notifications
+  notificationPreferences: {
+    dailyReminder: { type: Boolean, default: true },
+    challengeUpdates: { type: Boolean, default: true },
+    partnerActivity: { type: Boolean, default: true },
+    // Time for daily reminder (hour in 24h format, default 4pm)
+    dailyReminderHour: { type: Number, default: 16, min: 0, max: 23 },
+  },
 }, {
   timestamps: true
 });

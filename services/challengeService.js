@@ -140,11 +140,18 @@ class ChallengeService {
   }
 
   // ✅ NEW: Check and handle challenge recurrence (auto-renewal)
+  // Now supports infinite renewal (weeksCount = null) until abandoned
   async _handleRecurrenceIfNeeded(challenge) {
     if (!challenge?.recurrence?.enabled) return null;
-    if (challenge.recurrence.weeksCompleted >= challenge.recurrence.weeksCount) return null;
+    
+    // If weeksCount is set and reached, stop renewal
+    const weeksCount = challenge.recurrence.weeksCount;
+    const weeksCompleted = challenge.recurrence.weeksCompleted || 0;
+    if (weeksCount !== null && weeksCount !== undefined && weeksCompleted >= weeksCount) {
+      return null;
+    }
 
-    // Only renew completed or successful challenges
+    // Only renew completed or successful challenges (not abandoned/failed without completion)
     if (challenge.status !== 'completed' && challenge.settlement?.status !== 'success') {
       return null;
     }
@@ -152,17 +159,17 @@ class ChallengeService {
     this._log('🔄 Auto-renewing challenge:', {
       id: challenge._id,
       mode: challenge.mode,
-      weeksCompleted: challenge.recurrence.weeksCompleted,
-      weeksCount: challenge.recurrence.weeksCount
+      weeksCompleted: weeksCompleted,
+      weeksCount: weeksCount || 'infinite'
     });
 
     try {
       // Increment weeks completed on the original challenge
-      challenge.recurrence.weeksCompleted = (challenge.recurrence.weeksCompleted || 0) + 1;
+      challenge.recurrence.weeksCompleted = weeksCompleted + 1;
       await challenge.save();
 
-      // Check if we still have weeks remaining
-      if (challenge.recurrence.weeksCompleted >= challenge.recurrence.weeksCount) {
+      // Check if we still have weeks remaining (if weeksCount is set)
+      if (weeksCount !== null && weeksCount !== undefined && challenge.recurrence.weeksCompleted >= weeksCount) {
         this._log('✅ Recurrence completed, no more renewals');
         return null;
       }
@@ -545,8 +552,8 @@ class ChallengeService {
       });
       staked = true;
 
-      // ✅ CHANGÉ: Utiliser 7 jours à partir de maintenant (pas la semaine calendaire)
-      const { startDate, endDate } = this._calculate7DayChallengeDates();
+      // ✅ CHANGÉ: Utiliser la semaine calendaire Lundi-Dimanche
+      const { startDate, endDate, weekNumber, year } = this._calculateWeekChallengeDates();
 
       // Build perActivityGoals Map if provided
       let perActivityGoalsMap = undefined;
@@ -557,15 +564,18 @@ class ChallengeService {
         }
       }
 
-      // Build recurrence object if enabled
-      let recurrenceData = undefined;
-      if (recurrence?.enabled && recurrence?.weeksCount > 0) {
-        recurrenceData = {
-          enabled: true,
-          weeksCount: Math.min(52, Math.max(1, recurrence.weeksCount)),
-          weeksCompleted: 0,
-          parentChallengeId: null
-        };
+      // ✅ CHANGÉ: Renouvellement automatique activé par défaut (infini jusqu'à abandon)
+      // weeksCount = null signifie renouvellement infini
+      let recurrenceData = {
+        enabled: true,
+        weeksCount: recurrence?.weeksCount ?? null, // null = infini
+        weeksCompleted: 0,
+        parentChallengeId: null
+      };
+      
+      // Si explicitement désactivé
+      if (recurrence?.enabled === false) {
+        recurrenceData = { enabled: false, weeksCount: null, weeksCompleted: 0, parentChallengeId: null };
       }
 
       const challenge = new WeeklyChallenge({
@@ -586,6 +596,8 @@ class ChallengeService {
         icon: icon || 'trophy-outline',
         startDate,
         endDate,
+        weekNumber,
+        year,
         status: 'active',
         stakePerPlayer: this.STAKE_PER_PLAYER,
         stakes: [{ user: userId, amount: this.STAKE_PER_PLAYER, status: 'held', updatedAt: new Date() }],
@@ -595,7 +607,7 @@ class ChallengeService {
 
       await challenge.save();
 
-      this._log('✅ Challenge SOLO créé (7 jours):', challenge._id);
+      this._log('✅ Challenge SOLO créé (semaine', weekNumber, '/', year, '):', challenge._id);
       return challenge;
     } catch (error) {
       if (staked) {
@@ -752,15 +764,17 @@ class ChallengeService {
       }
     }
 
-    // Build recurrence object if enabled
-    let recurrenceData = undefined;
-    if (recurrence?.enabled && recurrence?.weeksCount > 0) {
-      recurrenceData = {
-        enabled: true,
-        weeksCount: Math.min(52, Math.max(1, recurrence.weeksCount)),
-        weeksCompleted: 0,
-        parentChallengeId: null
-      };
+    // ✅ CHANGÉ: Renouvellement automatique activé par défaut (infini jusqu'à abandon)
+    let recurrenceData = {
+      enabled: true,
+      weeksCount: recurrence?.weeksCount ?? null, // null = infini
+      weeksCompleted: 0,
+      parentChallengeId: null
+    };
+    
+    // Si explicitement désactivé
+    if (recurrence?.enabled === false) {
+      recurrenceData = { enabled: false, weeksCount: null, weeksCompleted: 0, parentChallengeId: null };
     }
 
     let staked = false;
@@ -1169,7 +1183,8 @@ class ChallengeService {
     }
 
     // Both signed -> activate.
-    const { startDate, endDate } = this._calculate7DayChallengeDates();
+    // ✅ CHANGÉ: Utiliser la semaine calendaire Lundi-Dimanche
+    const { startDate, endDate, weekNumber, year } = this._calculateWeekChallengeDates();
 
     // Hold invitee stake at activation time (creator stake is held at creation).
     const inviteeStakeHeld = Array.isArray(challenge.stakes)
@@ -1198,6 +1213,8 @@ class ChallengeService {
           $set: {
             startDate,
             endDate,
+            weekNumber,
+            year,
             status: 'active',
             invitationStatus: 'accepted',
           },
@@ -1908,21 +1925,141 @@ class ChallengeService {
     return Array.isArray(challenges) ? challenges : [];
   }
 
-  // ⭐ Helper : calculer les dates de la semaine
-  // ✅ NOUVEAU: Calculer 7 jours exactement à partir de maintenant
-  // Utilisé quand un challenge est créé (SOLO) ou accepté (DUO)
-  _calculate7DayChallengeDates() {
-    const startDate = new Date();
-    // ✅ Durée fixe: exactement 7 * 24h à partir de l'activation
-    const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // ⭐ NEW: Récupérer le progrès annuel (52 semaines) avec le statut de chaque semaine
+  async getYearProgress(userId, year, options = {}) {
+    const { slot } = options;
 
-    this._log('📅 [_calculate7DayChallengeDates] Challenge 7 jours:', {
+    // Determine mode filter based on slot
+    let modeFilter = undefined;
+    if (slot === 'solo') {
+      modeFilter = 'solo';
+    } else if (slot === 'p1' || slot === 'p2') {
+      modeFilter = 'duo';
+    }
+
+    // Build query
+    const query = {
+      'players.user': userId,
+      year: year,
+      status: { $in: ['completed', 'failed', 'active'] },
+    };
+
+    if (modeFilter) {
+      query.mode = modeFilter;
+    }
+
+    // Fetch all challenges for this year
+    const challenges = await WeeklyChallenge.find(query)
+      .select('weekNumber year status settlement mode players')
+      .lean();
+
+    // Build a map of week results
+    const weekMap = new Map();
+    for (const c of challenges) {
+      const weekNum = c.weekNumber;
+      if (!weekNum || weekNum < 1 || weekNum > 53) continue;
+
+      // Determine success/failure
+      const isSuccess = c.settlement?.status === 'success' || c.status === 'completed';
+      const isFailed = c.settlement?.status === 'loss' || c.status === 'failed';
+      const isActive = c.status === 'active';
+
+      // Find player progress
+      const player = c.players?.find((p) => p.user?.toString() === userId.toString());
+      const progress = player?.progress || 0;
+
+      // If we already have an entry for this week, only override if this one is better
+      const existing = weekMap.get(weekNum);
+      if (!existing || (isSuccess && !existing.isSuccess)) {
+        weekMap.set(weekNum, {
+          weekNumber: weekNum,
+          status: isSuccess ? 'success' : isFailed ? 'failed' : isActive ? 'active' : 'none',
+          progress: progress,
+          mode: c.mode,
+        });
+      }
+    }
+
+    // Build array of 52/53 weeks
+    // Determine how many weeks in this year
+    const dec31 = new Date(year, 11, 31);
+    const maxWeeks = helpers.getISOWeekNumber(dec31);
+
+    const weeks = [];
+    for (let w = 1; w <= maxWeeks; w++) {
+      const entry = weekMap.get(w);
+      weeks.push({
+        weekNumber: w,
+        status: entry?.status || 'none',
+        progress: entry?.progress || 0,
+        mode: entry?.mode || null,
+      });
+    }
+
+    // Calculate stats
+    const successCount = weeks.filter((w) => w.status === 'success').length;
+    const failedCount = weeks.filter((w) => w.status === 'failed').length;
+    const activeCount = weeks.filter((w) => w.status === 'active').length;
+    const currentWeek = helpers.getISOWeekNumber(new Date());
+    const currentYear = helpers.getISOWeekYear(new Date());
+
+    return {
+      year,
+      weeks,
+      stats: {
+        total: maxWeeks,
+        success: successCount,
+        failed: failedCount,
+        active: activeCount,
+        remaining: year === currentYear ? maxWeeks - currentWeek : 0,
+      },
+      currentWeek: year === currentYear ? currentWeek : null,
+    };
+  }
+
+  // ⭐ Helper : calculer les dates de la semaine (Lundi-Dimanche)
+  // ✅ CHANGÉ: Utilise maintenant la semaine calendaire Lundi-Dimanche
+  // Les challenges commencent toujours le lundi et se terminent le dimanche 23:59:59
+  _calculateWeekChallengeDates() {
+    const { startDate, endDate } = helpers.getWeekBounds();
+    
+    this._log('📅 [_calculateWeekChallengeDates] Challenge semaine:', {
       start: startDate.toISOString(),
       end: endDate.toISOString(),
-      durationDays: 7
+      weekNumber: helpers.getISOWeekNumber(startDate),
+      year: helpers.getISOWeekYear(startDate)
     });
 
-    return { startDate, endDate };
+    return { 
+      startDate, 
+      endDate,
+      weekNumber: helpers.getISOWeekNumber(startDate),
+      year: helpers.getISOWeekYear(startDate)
+    };
+  }
+
+  // ⭐ Helper : calculer les dates de la semaine PROCHAINE (pour renouvellement)
+  _calculateNextWeekChallengeDates() {
+    const { startDate, endDate } = helpers.getNextWeekBounds();
+    
+    this._log('📅 [_calculateNextWeekChallengeDates] Challenge semaine prochaine:', {
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
+      weekNumber: helpers.getISOWeekNumber(startDate),
+      year: helpers.getISOWeekYear(startDate)
+    });
+
+    return { 
+      startDate, 
+      endDate,
+      weekNumber: helpers.getISOWeekNumber(startDate),
+      year: helpers.getISOWeekYear(startDate)
+    };
+  }
+
+  // ⭐ LEGACY: Garder pour compatibilité mais utilise maintenant la semaine calendaire
+  _calculate7DayChallengeDates() {
+    return this._calculateWeekChallengeDates();
   }
 
   _calculateWeekDates() {

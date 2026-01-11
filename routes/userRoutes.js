@@ -15,6 +15,10 @@ const {
 	acceptPartnerInvite,
 	refusePartnerInvite,
 	claimDailyChest,
+	updatePushToken,
+	deletePushToken,
+	getNotificationPreferences,
+	updateNotificationPreferences,
 } = require('../controllers/userController');
 
 // @route   GET /api/users/profile
@@ -81,5 +85,27 @@ router.post('/partner-invites/:inviteId/accept', protect, acceptPartnerInvite);
 // @desc    Refuse a partner invite
 // @access  Private
 router.post('/partner-invites/:inviteId/refuse', protect, refusePartnerInvite);
+
+// ============ PUSH NOTIFICATIONS ============
+
+// @route   PUT /api/users/push-token
+// @desc    Register push notification token
+// @access  Private
+router.put('/push-token', protect, updatePushToken);
+
+// @route   DELETE /api/users/push-token
+// @desc    Unregister push notification token
+// @access  Private
+router.delete('/push-token', protect, deletePushToken);
+
+// @route   GET /api/users/notification-preferences
+// @desc    Get notification preferences
+// @access  Private
+router.get('/notification-preferences', protect, getNotificationPreferences);
+
+// @route   PUT /api/users/notification-preferences
+// @desc    Update notification preferences
+// @access  Private
+router.put('/notification-preferences', protect, updateNotificationPreferences);
 
 module.exports = router;
